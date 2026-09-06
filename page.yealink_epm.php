@@ -3,7 +3,9 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-if (!defined('FREEPBX_IS_AUTH')) { die('No direct script access allowed'); }
+if (php_sapi_name() !== 'cli' && !defined('FREEPBX_IS_AUTH')) { 
+    die('No direct script access allowed'); 
+}
 
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
@@ -147,8 +149,24 @@ $builtin_ringtones = [
 ];
 
 // ============================================================================
-// 4. DOWNLOAD TEMPLATE ACTION
+// 4. DOWNLOAD TEMPLATE, RINGTONE STREAM, & VIEW MAC CFG ACTIONS
 // ============================================================================
+
+if (isset($_GET['action']) && $_GET['action'] === 'view_mac_cfg' && !empty($_GET['mac'])) {
+    if (ob_get_length()) { ob_clean(); }
+    header('Content-Type: text/plain');
+    
+    $mac = strtolower(preg_replace('/[^a-fA-F0-9]/', '', $_GET['mac']));
+    $cfg_path = $tftp_dir . $mac . '.cfg';
+
+    if (file_exists($cfg_path) && is_file($cfg_path)) {
+        echo file_get_contents($cfg_path);
+    } else {
+        http_response_code(404);
+        echo "Configuration file [{$mac}.cfg] not found in /tftpboot/";
+    }
+    exit;
+}
 
 if (isset($_GET['action']) && $_GET['action'] === 'download_template' && !empty($_GET['file'])) {
     $dl_file = basename($_GET['file']);
@@ -165,6 +183,36 @@ if (isset($_GET['action']) && $_GET['action'] === 'download_template' && !empty(
         header('Content-Length: ' . filesize($dl_path));
         readfile($dl_path);
         exit;
+    }
+}
+
+if (isset($_GET['action']) && ($_GET['action'] === 'download_ringtone' || $_GET['action'] === 'stream_ringtone') && !empty($_GET['file'])) {
+    $r_file = basename($_GET['file']);
+    $r_path = $ringtone_dir . $r_file;
+
+    if (file_exists($r_path) && is_file($r_path)) {
+        if (ob_get_length()) { ob_clean(); }
+        
+        $mime_type = (pathinfo($r_file, PATHINFO_EXTENSION) === 'mp3') ? 'audio/mpeg' : 'audio/wav';
+        
+        header('Content-Type: ' . $mime_type);
+        header('Content-Length: ' . filesize($r_path));
+        
+        if ($_GET['action'] === 'download_ringtone') {
+            header('Content-Disposition: attachment; filename="' . $r_file . '"');
+        } else {
+            header('Content-Disposition: inline; filename="' . $r_file . '"');
+        }
+        
+        header('Expires: 0');
+        header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
+        header('Pragma: public');
+        
+        readfile($r_path);
+        exit;
+    } else {
+        http_response_code(404);
+        die('File not found');
     }
 }
 
@@ -663,30 +711,84 @@ if (isset($pdo)) {
 ksort($all_extensions);
 
 // ============================================================================
-// 7. AJAX ENDPOINTS
+// 7. AJAX ENDPOINTS (INCLUDES AUDIO TRIMMING & SCANNING)
 // ============================================================================
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['single_ringtone_ajax'])) {
     if (ob_get_length()) { ob_clean(); }
     header('Content-Type: application/json');
 
-    if (isset($_FILES['ringtone_file']) && $_FILES['ringtone_file']['error'] === UPLOAD_ERR_OK) {
-        $uploaded_name = basename($_FILES['ringtone_file']['name']);
-        $target_path = $ringtone_dir . $uploaded_name;
+    $start_time = filter_input(INPUT_POST, 'start_time', FILTER_VALIDATE_FLOAT) ?: 0.0;
+    $duration   = filter_input(INPUT_POST, 'duration', FILTER_VALIDATE_FLOAT) ?: 0.0;
 
-        if (move_uploaded_file($_FILES['ringtone_file']['tmp_name'], $target_path)) {
-            @chown($target_path, 'asterisk');
-            clearstatcache(true, $target_path);
+    if (isset($_FILES['ringtone_file']) && $_FILES['ringtone_file']['error'] === UPLOAD_ERR_OK) {
+        $tmp_path = $_FILES['ringtone_file']['tmp_name'];
+        $orig_name = basename($_FILES['ringtone_file']['name']);
+        $ext = strtolower(pathinfo($orig_name, PATHINFO_EXTENSION));
+
+        if (in_array($ext, ['mp3', 'wav'])) {
+            $clean_filename = pathinfo($orig_name, PATHINFO_FILENAME) . '.wav';
+            $target_path = $ringtone_dir . $clean_filename;
+
+            exec('which ffmpeg 2>&1', $out_ff, $ret_ff);
+
+            if ($ret_ff === 0) {
+                $trim_flags = '';
+                if ($duration > 0) {
+                    $trim_flags = sprintf('-ss %f -t %f ', $start_time, $duration);
+                }
+
+                $cmd = sprintf(
+                    'ffmpeg -y %s-i %s -ac 1 -ar 8000 -acodec pcm_mulaw %s 2>&1',
+                    $trim_flags,
+                    escapeshellarg($tmp_path),
+                    escapeshellarg($target_path)
+                );
+                
+                exec($cmd, $output, $return_var);
+
+                if ($return_var === 0 && file_exists($target_path)) {
+                    @chown($target_path, 'asterisk');
+                    @chgrp($target_path, 'asterisk');
+                    clearstatcache(true, $target_path);
+
+                    echo json_encode([
+                        'status' => 'success',
+                        'filename' => $clean_filename,
+                        'size' => filesize($target_path)
+                    ]);
+                    exit;
+                } else {
+                    echo json_encode([
+                        'status' => 'error',
+                        'message' => 'FFmpeg audio conversion/trimming failed.'
+                    ]);
+                    exit;
+                }
+            } else {
+                if (move_uploaded_file($tmp_path, $target_path)) {
+                    @chown($target_path, 'asterisk');
+                    @chgrp($target_path, 'asterisk');
+                    clearstatcache(true, $target_path);
+
+                    echo json_encode([
+                        'status' => 'success',
+                        'filename' => $clean_filename,
+                        'size' => filesize($target_path)
+                    ]);
+                    exit;
+                }
+            }
+        } else {
             echo json_encode([
-                'status' => 'success', 
-                'filename' => $uploaded_name,
-                'size' => filesize($target_path)
+                'status' => 'error',
+                'message' => 'Invalid file format. Only .mp3 and .wav files are allowed.'
             ]);
             exit;
         }
     }
 
-    echo json_encode(['status' => 'error', 'message' => 'Failed to move uploaded file. Check directory permissions.']);
+    echo json_encode(['status' => 'error', 'message' => 'Failed to process uploaded ringtone file.']);
     exit;
 }
 
@@ -856,14 +958,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['upload_template_file']
         $ext_check = strtolower(pathinfo($orig_name, PATHINFO_EXTENSION));
 
         if ($ext_check === 'cfg' || $ext_check === 'template') {
-            // Strip .template.cfg, .cfg, .template, or trailing _template / -template / template from the name
             $clean_basename = preg_replace('/(\.template)?\.cfg$/i', '', $orig_name);
             $clean_basename = preg_replace('/(\.template|\.cfg|_template|-template|template)$/i', '', $clean_basename);
             
             $clean_basename = preg_replace('/[^a-zA-Z0-9_\-]/', '', $clean_basename);
             if (empty($clean_basename)) { $clean_basename = "uploaded_template"; }
 
-            // Cleanly append single .template.cfg
             $target_filename = $clean_basename . ".template.cfg";
             $destination_path = $template_dir . $target_filename;
 
@@ -931,7 +1031,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['flush_template_rington
             $tpl_filename = $target_tpl;
         }
 
-        // 1. Capture current checked ringtones from POST to maintain form state
         $posted_ringtones = $_POST['uploaded_ringtones'] ?? [];
         if (is_array($posted_ringtones)) {
             $formData['uploaded_ringtones'] = array_map('trim', $posted_ringtones);
@@ -939,7 +1038,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['flush_template_rington
             $formData['uploaded_ringtones'] = [];
         }
 
-        // 2. Re-generate and overwrite the master .template.cfg inside /tftpboot/templates/
         $generated_template_cfg = "## Yealink Template Configuration File ##\n";
         $generated_template_cfg .= "# Phone Model: " . ($_POST['phone_model'] ?? 'manual') . "\n";
         $generated_template_cfg .= "# Expansion Model: " . ($_POST['exp_model'] ?? 'none') . "\n";
@@ -966,10 +1064,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['flush_template_rington
         @file_put_contents($template_dir . $tpl_filename, $generated_template_cfg);
         @chown($template_dir . $tpl_filename, 'asterisk');
 
-        // 3. Rebuild device files with flush directives (%NULL%) and push check-sync
         $flushed_count = rebuildDevicesForTemplate($tpl_filename, $tftp_dir, $template_dir, $saved_global_admin_pass, true);
 
-        // Mark session flag that a flush command occurred for this template
         $_SESSION['pending_ringtone_flush'][$tpl_filename] = true;
 
         $status = "Pushed ringtone flush directive (%NULL%) to {$flushed_count} device(s) using template '{$tpl_filename}'. Click 'Save Template' to purge temporary flush directives.";
@@ -1196,7 +1292,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
         $generated_template_cfg .= trim($formData['custom_inputs']) . "\n\n";
     }
 
-    // Filter out %NULL% lines and empty/whitespace-only key-value pairs before saving
     $cleaned_lines = [];
     foreach (explode("\n", $generated_template_cfg) as $line) {
         $trimmed = trim($line);
@@ -1210,7 +1305,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     @file_put_contents($template_dir . $tpl_filename, $generated_template_cfg);
     @chown($template_dir . $tpl_filename, 'asterisk');
 
-    // CONDITIONAL DEVICE REBUILD: Only rebuild devices if a flush occurred previously
     if (!empty($_SESSION['pending_ringtone_flush'][$tpl_filename])) {
         $rebuilt_count = rebuildDevicesForTemplate($tpl_filename, $tftp_dir, $template_dir, $saved_global_admin_pass, false);
         unset($_SESSION['pending_ringtone_flush'][$tpl_filename]);
@@ -1225,8 +1319,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
 // ============================================================================
 // 10. DEVICE MANAGER ACTIONS & TEMPLATE FILE LOADERS
 // ============================================================================
-
-$show_flush_ringtone_btn = $ringtone_was_deleted;
 
 if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
     $tpl_filename = basename($_POST['template_to_load'] ?? '');
@@ -1570,10 +1662,9 @@ if (!isset($_POST['uploaded_ringtones']) && $_SERVER["REQUEST_METHOD"] !== "POST
     $formData['uploaded_ringtones'] = $ringtone_filenames;
 }
 
-// Extract ringtones currently referenced across [mac].cfg files for JS scanning
-$active_tpl_file = strpos($formData['template_name'], '.template.cfg') === false ? $formData['template_name'] . '.template.cfg' : $formData['template_name'];
 $mac_files = glob($tftp_dir . "*.cfg");
 $assigned_ringtone_references = [];
+$missing_referenced_ringtones = [];
 
 if (is_array($mac_files)) {
     foreach ($mac_files as $mf) {
@@ -1583,18 +1674,20 @@ if (is_array($mac_files)) {
         }
 
         $m_content = file_get_contents($mf);
-        if (preg_match('/#\s*Template\s*:\s*' . preg_quote($active_tpl_file, '/') . '/i', $m_content)) {
-            if (preg_match_all('/ringtone\.url\s*=\s*http:\/\/[^\/]+\/PhoneSettings\/ringtones\/([^\s]+)/i', $m_content, $rmatches)) {
-                foreach ($rmatches[1] as $referenced_ring) {
-                    $assigned_ringtone_references[$referenced_ring] = true;
-                    if (!in_array($referenced_ring, $ringtone_filenames) && !$just_flushed) {
-                        $show_flush_ringtone_btn = true;
-                    }
+        if (preg_match_all('/ringtone\.url\s*=\s*http:\/\/[^\/]+\/PhoneSettings\/ringtones\/([^\s]+)/i', $m_content, $rmatches)) {
+            foreach ($rmatches[1] as $referenced_ring) {
+                $assigned_ringtone_references[$referenced_ring] = true;
+                
+                if (!in_array($referenced_ring, $ringtone_filenames)) {
+                    $missing_referenced_ringtones[$referenced_ring] = true;
                 }
             }
         }
     }
 }
+
+// Only show flush button if a MAC file explicitly references a file no longer on disk
+$show_flush_ringtone_btn = !empty($missing_referenced_ringtones) && !$just_flushed;
 
 if ($just_flushed) {
     $show_flush_ringtone_btn = false;
@@ -1735,6 +1828,9 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
 <!-- 11. HTML VIEW & STYLES                                                       -->
 <!-- ============================================================================ -->
 
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.js"></script>
+
 <style>
     .gen-container { background: #fff; padding: 20px; border-radius: 6px; overflow: visible; }
     .gen-container label { font-weight: bold; display: block; margin-top: 10px; }
@@ -1824,7 +1920,7 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
     .gen-tab-content.active { display: block; }
 
     .gen-modal { display: none; position: fixed; z-index: 999; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
-    .gen-modal-content { background: #fff; margin: 10% auto; padding: 20px; width: 65%; border-radius: 8px; }
+    .gen-modal-content { background: #fff; margin: 8% auto; padding: 20px; width: 65%; border-radius: 8px; }
     .scan-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
     .scan-table th, .scan-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
     .scan-table th { background: #f2f2f2; }
@@ -1843,11 +1939,11 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
     
     .ringtone-grid-item { 
         display: grid; 
-        grid-template-columns: 200px 90px 220px 40px; 
+        grid-template-columns: 180px 80px 210px 60px 85px; 
         align-items: center; 
         padding: 6px 0; 
         border-bottom: 1px dashed #e0e0e0; 
-        gap: 10px;
+        gap: 8px;
     }
     .ringtone-grid-item:last-child { border-bottom: none; }
     
@@ -1857,7 +1953,7 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
     }
     .ringtone-player-controls audio {
         height: 28px;
-        max-width: 210px;
+        max-width: 200px;
     }
 
     .ringtone-size-badge { 
@@ -1871,10 +1967,10 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
         display: inline-block;
     }
     
-    .delete-icon-btn {
+    .action-icon-btn {
         background: none;
         border: none;
-        color: #dc3545;
+        color: #6c757d;
         cursor: pointer;
         padding: 4px;
         line-height: 0;
@@ -1883,12 +1979,17 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
         align-items: center;
         justify-content: center;
         transition: background-color 0.2s, color 0.2s;
+        text-decoration: none;
     }
-    .delete-icon-btn:hover { 
-        background-color: #f8d7da; 
-        color: #bd2130;
+    .action-icon-btn:hover { 
+        background-color: #e9ecef; 
+        color: #007bff;
     }
-    .delete-icon-btn svg {
+    .action-icon-btn.delete-icon:hover {
+        background-color: #f8d7da;
+        color: #dc3545;
+    }
+    .action-icon-btn svg {
         width: 16px;
         height: 16px;
         stroke: currentColor;
@@ -1954,6 +2055,11 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
     .spec-note { background: #e7f3fe; border-left: 4px solid #2196F3; padding: 8px 12px; font-size: 12px; margin-top: 5px; border-radius: 2px; color: #0c5460; }
     .warning-box { background: #f8d7da; border-left: 4px solid #dc3545; padding: 10px 14px; font-size: 13px; margin-top: 10px; border-radius: 2px; color: #721c24; font-weight: bold; }
     .flush-banner { background: #fff3cd; border: 1px solid #ffeeba; border-left: 4px solid #ffc107; padding: 12px; margin-bottom: 15px; border-radius: 4px; color: #856404; }
+
+    .noUi-connect { background: #007bff; }
+    .noUi-horizontal { height: 12px; }
+    .noUi-handle { height: 22px !important; width: 22px !important; top: -6px !important; border-radius: 50%; }
+    .noUi-handle:after, .noUi-handle:before { display: none; }
 </style>
 
 <!-- ============================================================================ -->
@@ -1964,33 +2070,56 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
     var scannedDeviceMacs = [];
     var ringtoneFileSizes = <?= json_encode($ringtone_file_sizes) ?>;
     var initialRingtoneStates = {};
-    var ringtoneHttpBase = <?= json_encode($ringtone_http_base) ?>;
     var assignedRingtoneReferences = <?= json_encode($assigned_ringtone_references) ?>;
     var initialShowFlushBtn = <?= json_encode($show_flush_ringtone_btn) ?>;
+    var activeTrimFile = null;
+    var sliderInstance = null;
 
     var yealinkModelSpecs = {
         "manual": { ringFormats: ".wav, .mp3", ringSize: "100KB - 2MB", maxRingtone: "10+", totalLimit: 10485760, logoFormat: ".dob, .bmp, .jpg, .png", logoRes: "Variable", logoSize: "Max 2MB" },
-        "T19P":   { ringFormats: ".wav", ringSize: "Max 100KB (8kHz PCMU/PCMA)", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
-        "T21P":   { ringFormats: ".wav", ringSize: "Max 100KB (8kHz PCMU/PCMA)", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
-        "T23G":   { ringFormats: ".wav", ringSize: "Max 100KB (8kHz PCMU/PCMA)", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
-        "T27G":   { ringFormats: ".wav", ringSize: "Max 100KB (8kHz PCMU/PCMA)", maxRingtone: "10", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "240 x 120", logoSize: "Max 30KB" },
-        "T28P":   { ringFormats: ".wav", ringSize: "Max 100KB (8kHz PCMU/PCMA)", maxRingtone: "10", totalLimit: 102400, logoFormat: ".dob / Monochromic BMP", logoRes: "320 x 160", logoSize: "Max 30KB" },
-        "T29G":   { ringFormats: ".wav, .mp3", ringSize: "Max 2MB (8-48kHz)", maxRingtone: "10", totalLimit: 20971520, logoFormat: ".jpg, .png, .bmp", logoRes: "480 x 272", logoSize: "Max 2MB" },
-        "T30":    { ringFormats: ".wav", ringSize: "Max 100KB (8kHz PCMU/PCMA)", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
-        "T31G":   { ringFormats: ".wav", ringSize: "Max 100KB (8kHz PCMU/PCMA)", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
+        "T19P":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
+        "T21P":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
+        "T23G":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
+        "T27G":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "10", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "240 x 120", logoSize: "Max 30KB" },
+        "T28P":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "10", totalLimit: 102400, logoFormat: ".dob / Monochromic BMP", logoRes: "320 x 160", logoSize: "Max 30KB" },
+        "T29G":   { ringFormats: ".wav, .mp3", ringSize: "Max 2MB", maxRingtone: "10", totalLimit: 20971520, logoFormat: ".jpg, .png, .bmp", logoRes: "480 x 272", logoSize: "Max 2MB" },
+        "T30":    { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
+        "T31G":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
         "T33G":   { ringFormats: ".wav, .mp3", ringSize: "Max 2MB", maxRingtone: "10", totalLimit: 10485760, logoFormat: ".jpg, .png, .bmp", logoRes: "320 x 240", logoSize: "Max 2MB" },
-        "T40P":   { ringFormats: ".wav", ringSize: "Max 100KB", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
-        "T41S":   { ringFormats: ".wav", ringSize: "Max 100KB", maxRingtone: "10", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "192 x 64", logoSize: "Max 30KB" },
-        "T42S":   { ringFormats: ".wav", ringSize: "Max 100KB", maxRingtone: "10", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "192 x 64", logoSize: "Max 30KB" },
-        "T43U":   { ringFormats: ".wav", ringSize: "Max 300KB", maxRingtone: "10", totalLimit: 307200, logoFormat: "Monochrome BMP", logoRes: "370 x 160", logoSize: "Max 50KB" },
+        "T40P":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
+        "T41S":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "10", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "192 x 64", logoSize: "Max 30KB" },
+        "T42S":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "10", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "192 x 64", logoSize: "Max 30KB" },
+        "T43U":   { ringFormats: ".wav, .mp3", ringSize: "Max 300KB", maxRingtone: "10", totalLimit: 307200, logoFormat: "Monochrome BMP", logoRes: "370 x 160", logoSize: "Max 50KB" },
         "T46S":   { ringFormats: ".wav, .mp3", ringSize: "Max 2MB", maxRingtone: "10", totalLimit: 20971520, logoFormat: ".jpg, .png, .bmp", logoRes: "480 x 272", logoSize: "Max 2MB" },
         "T48S":   { ringFormats: ".wav, .mp3", ringSize: "Max 2MB", maxRingtone: "10", totalLimit: 20971520, logoFormat: ".jpg, .png, .bmp", logoRes: "800 x 480", logoSize: "Max 2MB" },
-        "T53W":   { ringFormats: ".wav", ringSize: "Max 300KB", maxRingtone: "10", totalLimit: 307200, logoFormat: "Monochrome BMP", logoRes: "370 x 160", logoSize: "Max 50KB" },
+        "T53W":   { ringFormats: ".wav, .mp3", ringSize: "Max 300KB", maxRingtone: "10", totalLimit: 307200, logoFormat: "Monochrome BMP", logoRes: "370 x 160", logoSize: "Max 50KB" },
         "T54W":   { ringFormats: ".wav, .mp3", ringSize: "Max 2MB", maxRingtone: "10", totalLimit: 20971520, logoFormat: ".jpg, .png, .bmp", logoRes: "480 x 272", logoSize: "Max 2MB" },
         "T57W":   { ringFormats: ".wav, .mp3", ringSize: "Max 2MB", maxRingtone: "10", totalLimit: 20971520, logoFormat: ".jpg, .png, .bmp", logoRes: "800 x 480", logoSize: "Max 2MB" },
         "T58A":   { ringFormats: ".wav, .mp3", ringSize: "Max 5MB", maxRingtone: "15", totalLimit: 20971520, logoFormat: ".jpg, .png, .bmp", logoRes: "1024 x 600", logoSize: "Max 5MB" },
         "VP59":   { ringFormats: ".wav, .mp3", ringSize: "Max 5MB", maxRingtone: "15", totalLimit: 20971520, logoFormat: ".jpg, .png, .bmp", logoRes: "1280 x 800", logoSize: "Max 5MB" }
     };
+
+    function openViewConfigModal(mac) {
+        var titleElem = document.getElementById('view_cfg_mac_title');
+        var contentElem = document.getElementById('view_cfg_content');
+        
+        titleElem.innerText = mac.toLowerCase() + '.cfg';
+        contentElem.value = 'Loading configuration file...';
+        document.getElementById('viewConfigModal').style.display = 'block';
+
+        fetch('?display=yealink_epm&action=view_mac_cfg&mac=' + encodeURIComponent(mac))
+            .then(function(response) { return response.text(); })
+            .then(function(text) {
+                contentElem.value = text;
+            })
+            .catch(function(err) {
+                contentElem.value = 'Error loading configuration file.';
+            });
+    }
+
+    function closeViewConfigModal() {
+        document.getElementById('viewConfigModal').style.display = 'none';
+    }
 
     function downloadSelectedTemplate() {
         var sel = document.getElementById('select_template_file');
@@ -2035,6 +2164,29 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
+    function toggleAudioLoop(playerId, shouldLoop) {
+        var player = document.getElementById(playerId);
+        if (player) {
+            player.loop = shouldLoop;
+        }
+    }
+
+    function editUploadedRingtone(filename) {
+        var streamUrl = '?display=yealink_epm&action=stream_ringtone&file=' + encodeURIComponent(filename);
+        fetch(streamUrl)
+            .then(function(res) {
+                if (!res.ok) throw new Error("HTTP error " + res.status);
+                return res.blob();
+            })
+            .then(function(blob) {
+                var fileObj = new File([blob], filename, { type: 'audio/wav' });
+                openAudioTrimmerModal(fileObj);
+            })
+            .catch(function(err) {
+                alert("Failed to fetch ringtone for editing.");
+            });
+    }
+
     function addRingtoneToDOM(filename, filesize) {
         var container = document.querySelector('.ringtone-list-container');
         if (!container) return;
@@ -2051,7 +2203,9 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
         }
 
         var sizeFormatted = (filesize > 0) ? (filesize / 1024).toFixed(1) + ' KB' : '0 KB';
-        var fileUrl = ringtoneHttpBase + encodeURIComponent(filename);
+        var downloadUrl = '?display=yealink_epm&action=download_ringtone&file=' + encodeURIComponent(filename);
+        var streamUrl   = '?display=yealink_epm&action=stream_ringtone&file=' + encodeURIComponent(filename);
+        var cleanId     = filename.replace(/[^a-zA-Z0-9]/g, '_');
         
         var gridItem = document.createElement('div');
         gridItem.className = 'ringtone-grid-item';
@@ -2064,13 +2218,34 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
                 <span class="ringtone-size-badge">(${sizeFormatted})</span>
             </div>
             <div class="ringtone-player-controls">
-                <audio controls preload="none" controlsList="nodownload">
-                    <source src="${fileUrl}" type="audio/wav">
-                    <source src="${fileUrl}" type="audio/mpeg">
+                <audio id="audio_player_${cleanId}" controls preload="none" controlsList="nodownload">
+                    <source src="${streamUrl}" type="audio/wav">
+                    <source src="${streamUrl}" type="audio/mpeg">
                 </audio>
             </div>
-            <div>
-                <button type="button" class="delete-icon-btn" title="Delete ${filename}" onclick="confirmDeleteFile('${filename}', 'ringtone')">
+            <div style="display:flex; align-items:center; gap:4px;">
+                <label style="font-size:11px; font-weight:600; color:#555; cursor:pointer; margin:0; display:inline-flex; align-items:center; gap:3px;">
+                    <input type="checkbox" onchange="toggleAudioLoop('audio_player_${cleanId}', this.checked)"> Loop
+                </label>
+            </div>
+            <div style="display:flex; align-items:center; gap:2px;">
+                <button type="button" class="action-icon-btn" title="Trim / Edit ${filename}" onclick="editUploadedRingtone('${filename}')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="6" cy="6" r="3"></circle>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <line x1="20" y1="4" x2="8.12" y2="15.88"></line>
+                        <line x1="14.47" y1="14.47" x2="20" y2="20"></line>
+                        <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
+                    </svg>
+                </button>
+                <a href="${downloadUrl}" class="action-icon-btn" title="Download ${filename}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                </a>
+                <button type="button" class="action-icon-btn delete-icon" title="Delete ${filename}" onclick="confirmDeleteFile('${filename}', 'ringtone')">
                     <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="3 6 5 6 21 6"></polyline>
                         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -2091,7 +2266,7 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
                 optGroup.label = 'Uploaded Custom Ringtones';
                 selectElem.appendChild(optGroup);
             }
-            var optId = 'opt_custom_' + filename.replace(/[^a-zA-Z0-9]/g, '_');
+            var optId = 'opt_custom_' + cleanId;
             if (!document.getElementById(optId)) {
                 var opt = document.createElement('option');
                 opt.id = optId;
@@ -2100,6 +2275,120 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
                 optGroup.appendChild(opt);
             }
         }
+    }
+
+    function openAudioTrimmerModal(file) {
+        activeTrimFile = file;
+        document.getElementById('trimmer_filename').innerText = file.name;
+
+        var audioPlayer = document.getElementById('trimmer_audio_player');
+        audioPlayer.src = URL.createObjectURL(file);
+
+        audioPlayer.onloadedmetadata = function() {
+            var totalDuration = audioPlayer.duration;
+            var sliderElem = document.getElementById('audio_trim_slider');
+
+            if (sliderInstance) {
+                sliderInstance.destroy();
+            }
+
+            sliderInstance = noUiSlider.create(sliderElem, {
+                start: [0, totalDuration],
+                connect: true,
+                range: {
+                    'min': 0,
+                    'max': totalDuration
+                },
+                step: 0.1
+            });
+
+            sliderInstance.on('update', function(values) {
+                var start = parseFloat(values[0]);
+                var end = parseFloat(values[1]);
+                var dur = end - start;
+
+                document.getElementById('trim_start_val').innerText = start.toFixed(1);
+                document.getElementById('trim_end_val').innerText = end.toFixed(1);
+                document.getElementById('trim_duration_val').innerText = dur.toFixed(1);
+            });
+
+            document.getElementById('trimmerModal').style.display = 'block';
+        };
+    }
+
+    function closeTrimmerModal() {
+        document.getElementById('trimmerModal').style.display = 'none';
+        var audioPlayer = document.getElementById('trimmer_audio_player');
+        audioPlayer.pause();
+        audioPlayer.src = '';
+    }
+
+    function previewCroppedAudio() {
+        var audioPlayer = document.getElementById('trimmer_audio_player');
+        var sliderValues = sliderInstance.get();
+        var startTime = parseFloat(sliderValues[0]);
+        var endTime = parseFloat(sliderValues[1]);
+
+        audioPlayer.currentTime = startTime;
+        audioPlayer.play();
+
+        var checkTime = function() {
+            if (audioPlayer.currentTime >= endTime) {
+                audioPlayer.pause();
+                audioPlayer.removeEventListener('timeupdate', checkTime);
+            }
+        };
+        audioPlayer.addEventListener('timeupdate', checkTime);
+    }
+
+    function submitAudioCrop() {
+        var sliderValues = sliderInstance.get();
+        var startTime = parseFloat(sliderValues[0]);
+        var duration = parseFloat(sliderValues[1]) - startTime;
+
+        var formData = new FormData();
+        formData.append('single_ringtone_ajax', '1');
+        formData.append('ringtone_file', activeTrimFile);
+        formData.append('start_time', startTime);
+        formData.append('duration', duration);
+
+        var uploadBtn = document.getElementById('async_upload_btn');
+        uploadBtn.disabled = true;
+        uploadBtn.innerText = 'Processing Crop...';
+
+        fetch(window.location.href, {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                ringtoneFileSizes[data.filename] = data.size;
+                addRingtoneToDOM(data.filename, data.size);
+                calculateTotalRingtonePayloadSize();
+                closeTrimmerModal();
+                
+                uploadBtn.disabled = false;
+                uploadBtn.innerText = 'Upload Ringtones';
+
+                var fileInput = document.getElementById('ringtone_file_input');
+                fileInput.value = '';
+                var textarea = document.getElementById('selected_files_textarea');
+                if (textarea) {
+                    textarea.value = '';
+                    textarea.style.display = 'none';
+                }
+            } else {
+                alert('Error cropping audio: ' + data.message);
+                uploadBtn.disabled = false;
+                uploadBtn.innerText = 'Upload Ringtones';
+            }
+        })
+        .catch(err => {
+            alert('Error processing audio request.');
+            uploadBtn.disabled = false;
+            uploadBtn.innerText = 'Upload Ringtones';
+        });
     }
 
     function uploadRingtonesAsync(event) {
@@ -2113,9 +2402,14 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
             return;
         }
 
+        if (files.length === 1) {
+            openAudioTrimmerModal(files[0]);
+            return;
+        }
+
         var uploadBtn = document.getElementById('async_upload_btn');
         uploadBtn.disabled = true;
-        uploadBtn.innerText = 'Uploading (0/' + files.length + ')...';
+        uploadBtn.innerText = 'Uploading & Converting (0/' + files.length + ')...';
 
         var uploadQueue = Array.from(files);
         var totalFiles = files.length;
@@ -2152,7 +2446,7 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
             .then(function(data) {
                 if (data.status === 'success') {
                     completed++;
-                    uploadBtn.innerText = 'Uploading (' + completed + '/' + totalFiles + ')...';
+                    uploadBtn.innerText = 'Uploading & Converting (' + completed + '/' + totalFiles + ')...';
                     ringtoneFileSizes[data.filename] = data.size;
                     
                     addRingtoneToDOM(data.filename, data.size);
@@ -2246,7 +2540,7 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
         
         var rNote = document.getElementById('ringtone_spec_note');
         if (rNote) {
-            rNote.innerHTML = `<strong>Model Specs (${model}):</strong> Formats: <b>${spec.ringFormats}</b> | Max File Size: <b>${spec.ringSize}</b> | Max Slots: <b>${spec.maxRingtone}</b> | Total Allowance: <b>${formatBytes(spec.totalLimit)}</b>`;
+            rNote.innerHTML = `<strong>Model Specs (${model}):</strong> Formats: <b>.wav, .mp3 (Auto-converted to 8kHz pcmu)</b> | Max File Size: <b>${spec.ringSize}</b> | Max Slots: <b>${spec.maxRingtone}</b> | Total Allowance: <b>${formatBytes(spec.totalLimit)}</b>`;
         }
 
         var lNote = document.getElementById('logo_spec_note');
@@ -2256,11 +2550,7 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
 
         var ringInput = document.getElementById('ringtone_file_input');
         if (ringInput) {
-            if (spec.ringFormats.indexOf('.mp3') !== -1) {
-                ringInput.setAttribute('accept', '.wav,.mp3');
-            } else {
-                ringInput.setAttribute('accept', '.wav');
-            }
+            ringInput.setAttribute('accept', '.wav,.mp3');
         }
 
         calculateTotalRingtonePayloadSize();
@@ -2476,10 +2766,10 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
     }
 
     function checkUncheckedRingtonesState() {
-        var requiresFlush = initialShowFlushBtn;
+        var requiresFlush = false;
 
         document.querySelectorAll('input[name="uploaded_ringtones[]"]').forEach(function(cb) {
-            if (!cb.checked && assignedRingtoneReferences[cb.value] === true) {
+            if (!cb.checked && initialRingtoneStates[cb.value] === true) {
                 requiresFlush = true;
             }
         });
@@ -2695,6 +2985,8 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
             initialRingtoneStates[cb.value] = cb.checked;
         });
 
+        checkUncheckedRingtonesState();
+
         if (window.location.hash === '#tab_devices' || '<?= $formData['active_tab'] ?>' === 'tab_devices') {
             switchTab('tab_devices');
         } else if (window.location.hash === '#tab_template' || '<?= $formData['active_tab'] ?>' === 'tab_template' || window.location.hash === '#ringtone_section') {
@@ -2718,6 +3010,45 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
 </form>
 
 <!-- MODALS -->
+<div id="viewConfigModal" class="gen-modal">
+    <div class="gen-modal-content" style="width: 700px;">
+        <h3>Device Configuration (<span id="view_cfg_mac_title"></span>)</h3>
+        <textarea id="view_cfg_content" readonly class="gen-textarea" style="height: 400px; font-size: 12px; background: #f8f9fa;"></textarea>
+        <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
+            <button type="button" class="gen-btn-danger" style="margin: 0;" onclick="closeViewConfigModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<div id="trimmerModal" class="gen-modal">
+    <div class="gen-modal-content" style="width: 520px;">
+        <h3>Crop & Trim Ringtone Audio</h3>
+        
+        <div style="text-align: center; margin: 15px 0;">
+            <p id="trimmer_filename" style="font-weight: bold; font-size: 14px; margin-bottom: 10px; color: #007bff;"></p>
+            <audio id="trimmer_audio_player" controls style="width: 100%; margin-bottom: 20px;"></audio>
+            
+            <div id="range_slider_container" style="padding: 10px 15px; margin-bottom: 10px;">
+                <div id="audio_trim_slider"></div>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; margin-top: 15px; font-weight: bold; font-size: 13px; color: #495057;">
+                <span>Start: <span id="trim_start_val" style="color:#007bff;">0.0</span>s</span>
+                <span>Duration: <span id="trim_duration_val" style="color:#28a745;">0.0</span>s</span>
+                <span>End: <span id="trim_end_val" style="color:#007bff;">0.0</span>s</span>
+            </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; gap: 10px; margin-top: 20px;">
+            <button type="button" class="gen-btn" style="background: #17a2b8; margin: 0;" onclick="previewCroppedAudio()">Preview Selection</button>
+            <div style="display: flex; gap: 8px;">
+                <button type="button" class="gen-btn" style="background: #28a745; margin: 0;" onclick="submitAudioCrop()">Crop & Save</button>
+                <button type="button" class="gen-btn-danger" style="margin: 0;" onclick="closeTrimmerModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="scanModal" class="gen-modal">
     <div class="gen-modal-content">
         <h3>Subnet MAC Address Scanner (Yealink)</h3>
@@ -3201,7 +3532,7 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
             <div id="ringtone_section"></div>
             <h3 class="gen-section-title">Ringtone Management & Provisioning</h3>
 
-            <div id="flush_banner_container" class="flush-banner" style="display: <?= ($show_flush_ringtone_btn && !empty($formData['template_name'])) ? 'block' : 'none' ?>;">
+            <div id="flush_banner_container" class="flush-banner" style="display: <?= $show_flush_ringtone_btn ? 'block' : 'none' ?>;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <strong>&#9888; Unreferenced / Deleted Ringtone(s) Detected in Phone Configs:</strong> One or more device <code>[mac].cfg</code> files assigned to this template reference ringtones that have been deleted or unchecked. Click below to issue a flush directive and sync all affected phones.
@@ -3226,7 +3557,10 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
                             $is_checked = in_array($r_file, $formData['uploaded_ringtones']);
                             $f_size = $ringtone_file_sizes[$r_file] ?? 0;
                             $size_formatted = ($f_size > 0) ? round($f_size / 1024, 1) . ' KB' : '0 KB';
-                            $file_url = $ringtone_http_base . rawurlencode($r_file);
+                            
+                            $download_url = "?display=yealink_epm&action=download_ringtone&file=" . rawurlencode($r_file);
+                            $stream_url   = "?display=yealink_epm&action=stream_ringtone&file=" . rawurlencode($r_file);
+                            $clean_id     = preg_replace('/[^a-zA-Z0-9]/', '_', $r_file);
                         ?>
                             <div class="ringtone-grid-item">
                                 <label style="font-weight:normal; margin:0; display:flex; align-items:center;">
@@ -3239,14 +3573,36 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
                                 </div>
 
                                 <div class="ringtone-player-controls">
-                                    <audio controls preload="none" controlsList="nodownload">
-                                        <source src="<?= $file_url ?>" type="audio/wav">
-                                        <source src="<?= $file_url ?>" type="audio/mpeg">
+                                    <audio id="audio_player_<?= $clean_id ?>" controls preload="none" controlsList="nodownload">
+                                        <source src="<?= $stream_url ?>" type="audio/wav">
+                                        <source src="<?= $stream_url ?>" type="audio/mpeg">
                                     </audio>
                                 </div>
 
-                                <div>
-                                    <button type="button" class="delete-icon-btn" title="Delete <?= htmlspecialchars($r_file) ?>" onclick="confirmDeleteFile('<?= htmlspecialchars($r_file) ?>', 'ringtone')">
+                                <div style="display:flex; align-items:center; gap:4px;">
+                                    <label style="font-size:11px; font-weight:600; color:#555; cursor:pointer; margin:0; display:inline-flex; align-items:center; gap:3px;">
+                                        <input type="checkbox" onchange="toggleAudioLoop('audio_player_<?= $clean_id ?>', this.checked)"> Loop
+                                    </label>
+                                </div>
+
+                                <div style="display:flex; align-items:center; gap:2px;">
+                                    <button type="button" class="action-icon-btn" title="Trim / Edit <?= htmlspecialchars($r_file) ?>" onclick="editUploadedRingtone('<?= htmlspecialchars($r_file) ?>')">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <circle cx="6" cy="6" r="3"></circle>
+                                            <circle cx="6" cy="18" r="3"></circle>
+                                            <line x1="20" y1="4" x2="8.12" y2="15.88"></line>
+                                            <line x1="14.47" y1="14.47" x2="20" y2="20"></line>
+                                            <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
+                                        </svg>
+                                    </button>
+                                    <a href="<?= $download_url ?>" class="action-icon-btn" title="Download <?= htmlspecialchars($r_file) ?>">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                            <polyline points="7 10 12 15 17 10"></polyline>
+                                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                                        </svg>
+                                    </a>
+                                    <button type="button" class="action-icon-btn delete-icon" title="Delete <?= htmlspecialchars($r_file) ?>" onclick="confirmDeleteFile('<?= htmlspecialchars($r_file) ?>', 'ringtone')">
                                         <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <polyline points="3 6 5 6 21 6"></polyline>
                                             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -3409,6 +3765,16 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                            </svg>
+                                        </button>
+
+                                        <button type="button" 
+                                                title="View Config File" 
+                                                onclick="openViewConfigModal('<?= htmlspecialchars($dev['mac']) ?>')" 
+                                                style="background:none; border:none; cursor:pointer; padding:2px 4px; display:inline-flex; align-items:center; color:#007bff;">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                                <circle cx="12" cy="12" r="3"></circle>
                                             </svg>
                                         </button>
                                     </div>

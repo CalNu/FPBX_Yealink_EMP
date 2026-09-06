@@ -287,7 +287,9 @@ function buildDistinctiveRingtoneConfigBlock($active_ringtones = []) {
         return "";
     }
 
-    $ring_files = array_values($active_ringtones);
+    $ring_files = array_values(array_unique($active_ringtones));
+    // Sort using strict ASCII byte order (Uppercase before lowercase: CTU -> DBeep -> cisco -> ring)
+    sort($ring_files, SORT_STRING);
 
     $cfg = "######## DISTINCTIVE RINGTONE & ALERT INFO SETUP ########\n";
     $cfg .= "features.alert_info_tone = 1\n";
@@ -295,19 +297,17 @@ function buildDistinctiveRingtoneConfigBlock($active_ringtones = []) {
     $cfg .= "distinctive_ring_tones.alert_info.enable = 1\n\n";
     
     $legacy_index = 8;
-    $total_slots = 10;
+    $max_slots = min(count($ring_files), 10);
 
-    for ($r_idx = 1; $r_idx <= $total_slots; $r_idx++) {
-        if (isset($ring_files[$r_idx - 1])) {
-            $r_file = $ring_files[$r_idx - 1];
-            $text_name = pathinfo($r_file, PATHINFO_FILENAME);
-            
-            $cfg .= "distinctive_ring_tones.alert_info.{$r_idx}.text = {$text_name}\n";
-            $cfg .= "distinctive_ring_tones.alert_info.{$r_idx}.ringer = {$legacy_index}\n";
-            $cfg .= "account.1.alert_info_text.{$r_idx} = {$text_name}\n";
-            $cfg .= "account.1.alert_info_ringer.{$r_idx} = {$r_file}\n";
-            $legacy_index++;
-        }
+    for ($r_idx = 1; $r_idx <= $max_slots; $r_idx++) {
+        $r_file = $ring_files[$r_idx - 1];
+        $text_name = pathinfo($r_file, PATHINFO_FILENAME);
+        
+        $cfg .= "distinctive_ring_tones.alert_info.{$r_idx}.text = {$text_name}\n";
+        $cfg .= "distinctive_ring_tones.alert_info.{$r_idx}.ringer = {$legacy_index}\n";
+        $cfg .= "account.1.alert_info_text.{$r_idx} = {$text_name}\n";
+        $cfg .= "account.1.alert_info_ringer.{$r_idx} = {$legacy_index}\n";
+        $legacy_index++;
     }
     $cfg .= "######## END DISTINCTIVE RINGTONE SETUP ########\n\n";
     return $cfg;
@@ -366,6 +366,7 @@ function rebuildDevicesForTemplate($tpl_filename, $tftp_dir, $template_dir, $sav
 
                 if ($append_flush) {
                     $tpl_content = preg_replace('/######## DISTINCTIVE RINGTONE & ALERT INFO SETUP ########.*?######## END DISTINCTIVE RINGTONE SETUP ########/s', '', $tpl_content);
+                    $tpl_content = preg_replace('/^ringtone\.url\s*=.*$/m', '', $tpl_content);
 
                     $flush_block = "######## ONE-TIME RINGTONE FLASH CLEAR ########\n";
                     $flush_block .= "ringtone.delete = http://localhost/all\n";
@@ -466,21 +467,6 @@ function generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_ta
     $cfg .= "local_time.ntp_server1 = {$ntp1_target}\n";
     $cfg .= "local_time.ntp_server2 = {$ntp2_target}\n";
     $cfg .= "phone_setting.inter_digit_time = {$dial_timeout}\n\n";
-
-    $ringtone_dir = "/var/www/html/PhoneSettings/ringtones/";
-    $existing_ringtones = glob($ringtone_dir . "*.*");
-    $ring_files = array_map('basename', is_array($existing_ringtones) ? $existing_ringtones : []);
-    
-    if (!empty($ring_files)) {
-        $host_only = explode(':', $server_ip_target)[0];
-        $asset_host = "http://{$host_only}:83/PhoneSettings";
-        $cfg .= "######## GLOBAL RINGTONE DOWNLOAD DIRECTIVES ########\n";
-        foreach ($ring_files as $r_file) {
-            $r_url = "{$asset_host}/ringtones/" . $r_file;
-            $cfg .= "ringtone.url = {$r_url}\n";
-        }
-        $cfg .= "\n";
-    }
 
     $cfg .= "######## My DIALPLAN ########\n\n";
     $item_idx = 1;
@@ -1034,6 +1020,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['flush_template_rington
         $posted_ringtones = $_POST['uploaded_ringtones'] ?? [];
         if (is_array($posted_ringtones)) {
             $formData['uploaded_ringtones'] = array_map('trim', $posted_ringtones);
+            sort($formData['uploaded_ringtones'], SORT_STRING);
+            $formData['uploaded_ringtones'] = array_values(array_unique($formData['uploaded_ringtones']));
         } else {
             $formData['uploaded_ringtones'] = [];
         }
@@ -1152,6 +1140,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
 
     if (!isset($_POST['uploaded_ringtones'])) {
         $formData['uploaded_ringtones'] = [];
+    } else {
+        sort($formData['uploaded_ringtones'], SORT_STRING);
+        $formData['uploaded_ringtones'] = array_values(array_unique($formData['uploaded_ringtones']));
     }
 
     $formData["linekey_1_type"] = "15";
@@ -1217,6 +1208,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     $generated_template_cfg .= "account.1.ringtone.ring_type = {$acct_ring}\n";
     
     if (!empty($formData['uploaded_ringtones']) && is_array($formData['uploaded_ringtones'])) {
+        sort($formData['uploaded_ringtones'], SORT_STRING);
+        $formData['uploaded_ringtones'] = array_values(array_unique($formData['uploaded_ringtones']));
+
         $generated_template_cfg .= "account.1.alert_info_url_enable = 1\n\n";
         $generated_template_cfg .= "################################################\n";
         $generated_template_cfg .= "##         Uploaded Sound Files / Provisioning  ##\n";
@@ -1412,6 +1406,11 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
             if (!$is_parsed_tpl) {
                 $unparsed_tpl[] = "{$k} = {$v}";
             }
+        }
+
+        if (!empty($formData['uploaded_ringtones'])) {
+            sort($formData['uploaded_ringtones'], SORT_STRING);
+            $formData['uploaded_ringtones'] = array_values(array_unique($formData['uploaded_ringtones']));
         }
 
         if ($highest_tpl_linekey > 0) $max_linekeys = $formData['linekey_count'] = $highest_tpl_linekey;
@@ -1646,6 +1645,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
 // ============================================================================
 $existing_ringtones_init = glob($ringtone_dir . "*.*");
 $ringtone_filenames = array_map('basename', is_array($existing_ringtones_init) ? $existing_ringtones_init : []);
+sort($ringtone_filenames, SORT_STRING);
 
 $ringtone_file_sizes = [];
 foreach ($ringtone_filenames as $rf) {
@@ -1669,7 +1669,7 @@ $missing_referenced_ringtones = [];
 if (is_array($mac_files)) {
     foreach ($mac_files as $mf) {
         $m_base = strtolower(pathinfo($mf, PATHINFO_FILENAME));
-        if ($m_base === 'y000000000000' || strpos(strtolower($mf), 'template') !== false) {
+        if ($m_base === 'y00000000000' || strpos(strtolower($mf), 'template') !== false) {
             continue;
         }
 
@@ -1686,7 +1686,6 @@ if (is_array($mac_files)) {
     }
 }
 
-// Only show flush button if a MAC file explicitly references a file no longer on disk
 $show_flush_ringtone_btn = !empty($missing_referenced_ringtones) && !$just_flushed;
 
 if ($just_flushed) {
@@ -3763,7 +3762,7 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
                                                 onclick="enableMacEdit('<?= htmlspecialchars($dev['mac']) ?>')" 
                                                 style="background:none; border:none; cursor:pointer; padding:2px 4px; display:inline-flex; align-items:center;">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                                             </svg>
                                         </button>

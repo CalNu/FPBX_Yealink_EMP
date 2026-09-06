@@ -13,3 +13,10 @@ On the template manager tab, it will automatically pull the SIP port from what's
 The device manager tab has a scan tool that will scan your xxx.xxx.xxx.xxx/24 (ip can be manually changed if searching another subnet) subnet for available Yealink MAC addresses and their IP's and you can add them and the template on that page. You can also manually add the MAC if you if a specific phone is not found. 
 
 All MAC.cfg files, y000000000000.cfg, and templates are saved to the /tftpboot/ folder.  These can be browsed by going to https://PBX.IP/tftpboot and https://PBX.IP/PhoneSettings. The http port has been shifted to :83.
+
+1.0.0.9 updates: 
+Added upload/download template file. Save location moved to /tftpboot/templates/
+Added ringtone conversion to convert mp3 and wav to 8khz, pcmu, mono to match yealink requirements. This requires ffmpeg installed. Most freepbx has it preinstalled. The module will install it for you if not, but this must be done at the command line "fwconsole ma install yealink_epm" or fwconsole ma downloadinstall https://github.com/hgolbar/FPBX_Yealink_EMP/archive/refs/heads/1.0.0.8.zip"
+Added ability to trim audio files.
+Added download function for ringtones
+Added flush command when deleting ringtones in use may any mac.cfg files. This pushes a mac.cfg that deletes all ringtones and reinstalls checked ones.  Once the template is saved, it rebuilds the mac.cfg to remove the delete command so it doesn't keep deleting/reinstalling the ringtone on each reboot.

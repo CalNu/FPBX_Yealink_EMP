@@ -18,7 +18,7 @@ All MAC.cfg files, y000000000000.cfg, and templates are saved to the /tftpboot/ 
 
 •Added upload/download template file. Save location moved to /tftpboot/templates/
 
-•Added ringtone conversion to convert mp3 and wav to 8khz, pcmu, mono to match yealink requirements. This requires ffmpeg installed. Most freepbx has it preinstalled. The module will install it for you if not, but this must be done at the command line "fwconsole ma install yealink_epm" or fwconsole ma downloadinstall https://github.com/hgolbar/FPBX_Yealink_EMP/archive/refs/heads/1.0.0.9.zip"
+•Added ringtone conversion to convert mp3 and wav to 8khz, pcmu, mono to match yealink requirements. This requires ffmpeg installed. Most freepbx has it preinstalled. The module will install it for you if not, but this must be done at the command line "fwconsole ma install yealink_epm" or "fwconsole ma downloadinstall https://github.com/hgolbar/FPBX_Yealink_EMP/archive/refs/heads/1.0.0.9.zip"
 
 •Added ability to trim audio files.
 

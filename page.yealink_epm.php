@@ -253,8 +253,9 @@ function sendSipNotify($ext_or_mac, $event_type = 'check-sync', $phone_ip = '', 
     if ($event_type === 'reboot') {
         exec("asterisk -rx 'pjsip send notify reboot-yealink endpoint {$ext}' 2>&1 &");
     } else {
-        exec("asterisk -rx 'pjsip send notify check-sync endpoint {$ext}' 2>&1 &");
+        // Send silent background config sync without triggering reboot
         exec("asterisk -rx 'pjsip send notify yealink-check-cfg endpoint {$ext}' 2>&1 &");
+        exec("asterisk -rx 'pjsip send notify check-sync\;reboot=false endpoint {$ext}' 2>&1 &");
     }
 
     $contacts_output = [];
@@ -263,20 +264,10 @@ function sendSipNotify($ext_or_mac, $event_type = 'check-sync', $phone_ip = '', 
         foreach ($contacts_output as $line) {
             if (preg_match('/Contact:\s*(' . preg_quote($ext, '/') . '\/sip:[^\s]+)/i', $line, $cm)) {
                 $contact_uri = trim($cm[1]);
-                $notify_type = ($event_type === 'reboot') ? 'reboot-yealink' : 'check-sync';
+                $notify_type = ($event_type === 'reboot') ? 'reboot-yealink' : 'yealink-check-cfg';
                 exec("asterisk -rx 'pjsip send notify {$notify_type} contact {$contact_uri}' 2>&1 &");
             }
         }
-    }
-
-    if (!empty($phone_ip) && filter_var($phone_ip, FILTER_VALIDATE_IP)) {
-        $ch = curl_init("http://{$phone_ip}/servlet?p=settings-ring&q=load");
-        curl_setopt($ch, CURLOPT_USERPWD, "admin:{$admin_pass}");
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT_MS, 300);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT_MS, 300);
-        @curl_exec($ch);
-        @curl_close($ch);
     }
 
     return true;
@@ -288,7 +279,6 @@ function buildDistinctiveRingtoneConfigBlock($active_ringtones = []) {
     }
 
     $ring_files = array_values(array_unique($active_ringtones));
-    // Sort using strict ASCII byte order (Uppercase before lowercase: CTU -> DBeep -> cisco -> ring)
     sort($ring_files, SORT_STRING);
 
     $cfg = "######## DISTINCTIVE RINGTONE & ALERT INFO SETUP ########\n";
@@ -350,39 +340,47 @@ function rebuildDevicesForTemplate($tpl_filename, $tftp_dir, $template_dir, $sav
             if ($uses_tpl) {
                 $file_content = file_get_contents($cf);
                 
+                // Truncate existing inherited template section
                 if (($pos = strpos($file_content, '##### INHERITED TEMPLATE SETTINGS')) !== false) {
                     $base_content = substr($file_content, 0, $pos);
                 } else {
                     $base_content = $file_content;
                 }
 
+                // Strip prior flush blocks
                 if (($pos_flush = strpos($base_content, '######## ONE-TIME RINGTONE FLASH CLEAR ########')) !== false) {
                     $base_content = substr($base_content, 0, $pos_flush);
                 }
 
+                // Load existing template unchanged
                 $tpl_content = file_get_contents($tpl_path);
                 $tpl_content = preg_replace('/^account\.1\.sip_server.*$/m', '', $tpl_content);
                 $tpl_content = preg_replace('/^#!version:.*$/m', '', $tpl_content);
 
                 if ($append_flush) {
+                    // 1. Strip Distinctive Ringtone setup block
                     $tpl_content = preg_replace('/######## DISTINCTIVE RINGTONE & ALERT INFO SETUP ########.*?######## END DISTINCTIVE RINGTONE SETUP ########/s', '', $tpl_content);
+
+                    // 2. Strip all ringtone provisioning URLs so the phone cannot re-download them
                     $tpl_content = preg_replace('/^ringtone\.url\s*=.*$/m', '', $tpl_content);
 
+                    // 3. Construct explicit %NULL% flush block
                     $flush_block = "######## ONE-TIME RINGTONE FLASH CLEAR ########\n";
+                    $flush_block .= "account.1.ringtone.ring_type = Common\n";
+                    $flush_block .= "features.alert_info_tone = 0\n";
+                    $flush_block .= "account.1.alert_info_url_enable = 0\n";
+                    $flush_block .= "distinctive_ring_tones.alert_info.enable = 0\n";
                     $flush_block .= "ringtone.delete = http://localhost/all\n";
+
                     for ($clear_i = 1; $clear_i <= 10; $clear_i++) {
                         $flush_block .= "distinctive_ring_tones.alert_info.{$clear_i}.text = %NULL%\n";
                         $flush_block .= "distinctive_ring_tones.alert_info.{$clear_i}.ringer = %NULL%\n";
                         $flush_block .= "account.1.alert_info_text.{$clear_i} = %NULL%\n";
                         $flush_block .= "account.1.alert_info_ringer.{$clear_i} = %NULL%\n";
                     }
-                    $flush_block .= "\n";
+                    $flush_block .= "######## END ONE-TIME FLASH CLEAR ########\n\n";
 
-                    if (preg_match('/^account\.1\.ringtone\.ring_type\s*=/m', $tpl_content)) {
-                        $tpl_content = preg_replace('/^(account\.1\.ringtone\.ring_type\s*=)/m', $flush_block . '$1', $tpl_content, 1);
-                    } else {
-                        $tpl_content = $flush_block . $tpl_content;
-                    }
+                    $tpl_content = $flush_block . $tpl_content;
                 }
                 
                 $final_cfg = rtrim($base_content) . "\n\n##### INHERITED TEMPLATE SETTINGS ({$tpl_filename}) #####\n" . $tpl_content;
@@ -390,9 +388,10 @@ function rebuildDevicesForTemplate($tpl_filename, $tftp_dir, $template_dir, $sav
                 @file_put_contents($cf, $final_cfg);
                 @chown($cf, 'asterisk');
 
+                // Trigger background sync without rebooting
                 if (!empty($assigned_ext)) {
                     $target_ip = $arp_table[$mname] ?? '';
-                    sendSipNotify($assigned_ext, 'check-sync', $target_ip, $saved_global_admin_pass);
+                    sendSipNotify($assigned_ext, 'yealink-check-cfg', $target_ip, $saved_global_admin_pass);
                 }
                 $updated_count++;
             }
@@ -441,7 +440,7 @@ function generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_ta
     $cfg = "#!version:{$cfg_version}\n\n";
     $cfg .= "##File header \"#!version:{$cfg_version}\" can not be edited or deleted.##\n\n";
     $cfg .= "security.user_password = admin:{$admin_pass}\n\n";
-    $cfg .= "sip.notify_reboot_enable = 1\n";
+    $cfg .= "sip.notify_reboot_enable = 0\n";
     $cfg .= "phone_setting.zero_touch_enable = 1\n";
     $cfg .= "action_uri.enable = 1\n";
     $cfg .= "features.action_uri_limit_ip = any\n\n";
@@ -922,7 +921,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'add_scanned_device') {
         if ($should_notify && !empty($scanned_ext)) {
             $arp_table = getArpTableMap();
             $scanned_ip = $arp_table[$scanned_mac] ?? '';
-            sendSipNotify($scanned_ext, 'check-sync', $scanned_ip, $saved_global_admin_pass);
+            sendSipNotify($scanned_ext, 'yealink-check-cfg', $scanned_ip, $saved_global_admin_pass);
         }
 
         echo json_encode(['status' => 'success', 'mac' => $scanned_mac]);
@@ -1010,6 +1009,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_target_file']) 
 
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['flush_template_ringtones'])) {
     $target_tpl = trim($_POST['template_name'] ?? '');
+    if (empty($target_tpl) && !empty($_POST['current_loaded_template'])) {
+        $target_tpl = trim($_POST['current_loaded_template']);
+    }
+
     if (!empty($target_tpl)) {
         if (strpos($target_tpl, '.template.cfg') === false && strpos($target_tpl, '.cfg') === false) {
             $tpl_filename = $target_tpl . '.template.cfg';
@@ -1017,46 +1020,62 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['flush_template_rington
             $tpl_filename = $target_tpl;
         }
 
+        $tpl_path = $template_dir . $tpl_filename;
+
+        // 1. Capture currently checked ringtones from POST state
         $posted_ringtones = $_POST['uploaded_ringtones'] ?? [];
-        if (is_array($posted_ringtones)) {
-            $formData['uploaded_ringtones'] = array_map('trim', $posted_ringtones);
-            sort($formData['uploaded_ringtones'], SORT_STRING);
-            $formData['uploaded_ringtones'] = array_values(array_unique($formData['uploaded_ringtones']));
-        } else {
-            $formData['uploaded_ringtones'] = [];
+        if (!is_array($posted_ringtones)) {
+            $posted_ringtones = [];
         }
 
-        $generated_template_cfg = "## Yealink Template Configuration File ##\n";
-        $generated_template_cfg .= "# Phone Model: " . ($_POST['phone_model'] ?? 'manual') . "\n";
-        $generated_template_cfg .= "# Expansion Model: " . ($_POST['exp_model'] ?? 'none') . "\n";
-        $generated_template_cfg .= "# Expansion Count: " . ($_POST['exp_count'] ?? '0') . "\n\n";
-        $generated_template_cfg .= "account.1.sip_server = {$saved_global_server_ip}\n";
-        $generated_template_cfg .= "account.1.sip_server_host = {$saved_global_server_ip}\n";
-        $generated_template_cfg .= "account.1.sip_server_port = " . ($_POST['sip_port'] ?? $default_sip_port) . "\n";
-        $generated_template_cfg .= "account.1.port = " . ($_POST['sip_port'] ?? $default_sip_port) . "\n";
-        $generated_template_cfg .= "account.1.sip_listen_port = " . ($_POST['sip_listen_port'] ?? '5062') . "\n";
-        $generated_template_cfg .= "voice_mail.number.1 = " . ($_POST['voicemail_number'] ?? $default_voicemail_ext) . "\n\n";
-        $generated_template_cfg .= "account.1.ringtone.ring_type = " . ($_POST['account_ringtone'] ?? 'Common') . "\n";
+        // 2. Rewrite the .template.cfg file to persist deselections on disk
+        if (file_exists($tpl_path)) {
+            $tpl_lines = file($tpl_path, FILE_IGNORE_NEW_LINES);
+            $clean_tpl_lines = [];
+            $in_distinctive_block = false;
 
-        if (!empty($formData['uploaded_ringtones'])) {
-            $generated_template_cfg .= "account.1.alert_info_url_enable = 1\n\n";
-            $host_only = explode(':', $saved_global_server_ip)[0];
-            foreach ($formData['uploaded_ringtones'] as $r_file) {
-                $generated_template_cfg .= "ringtone.url = http://{$host_only}:83/PhoneSettings/ringtones/" . $r_file . "\n";
+            foreach ($tpl_lines as $t_line) {
+                $trimmed_line = trim($t_line);
+
+                // Skip old distinctive ringtone blocks
+                if (strpos($trimmed_line, '######## DISTINCTIVE RINGTONE & ALERT INFO SETUP ########') !== false) {
+                    $in_distinctive_block = true;
+                    continue;
+                }
+                if (strpos($trimmed_line, '######## END DISTINCTIVE RINGTONE SETUP ########') !== false) {
+                    $in_distinctive_block = false;
+                    continue;
+                }
+                if ($in_distinctive_block) {
+                    continue;
+                }
+
+                // Strip any ringtone.url entries that were unchecked in the UI
+                if (preg_match('/^ringtone\.url\s*=\s*http:\/\/[^\/]+\/PhoneSettings\/ringtones\/([^\s]+)/i', $trimmed_line, $rm)) {
+                    if (!in_array($rm[1], $posted_ringtones)) {
+                        continue;
+                    }
+                }
+
+                $clean_tpl_lines[] = $t_line;
             }
-            $generated_template_cfg .= "\n";
+
+            // Append updated distinctive ringtone block for remaining active ringtones
+            $updated_tpl_str = implode("\n", $clean_tpl_lines);
+            if (!empty($posted_ringtones)) {
+                $updated_tpl_str = rtrim($updated_tpl_str) . "\n\n" . buildDistinctiveRingtoneConfigBlock($posted_ringtones);
+            }
+
+            @file_put_contents($tpl_path, $updated_tpl_str);
+            @chown($tpl_path, 'asterisk');
         }
 
-        $generated_template_cfg .= buildDistinctiveRingtoneConfigBlock($formData['uploaded_ringtones']);
-
-        @file_put_contents($template_dir . $tpl_filename, $generated_template_cfg);
-        @chown($template_dir . $tpl_filename, 'asterisk');
-
+        // 3. Rebuild device configs applying the %NULL% flush override headers
         $flushed_count = rebuildDevicesForTemplate($tpl_filename, $tftp_dir, $template_dir, $saved_global_admin_pass, true);
 
         $_SESSION['pending_ringtone_flush'][$tpl_filename] = true;
 
-        $status = "Pushed ringtone flush directive (%NULL%) to {$flushed_count} device(s) using template '{$tpl_filename}'. Click 'Save Template' to purge temporary flush directives.";
+        $status = "Flushed deselected ringtones (%NULL%) across {$flushed_count} device(s) and saved changes to '{$tpl_filename}'.";
         $_POST['template_to_load'] = $tpl_filename;
         $just_flushed = true;
     }
@@ -1208,18 +1227,34 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     $generated_template_cfg .= "account.1.ringtone.ring_type = {$acct_ring}\n";
     
     if (!empty($formData['uploaded_ringtones']) && is_array($formData['uploaded_ringtones'])) {
-        sort($formData['uploaded_ringtones'], SORT_STRING);
-        $formData['uploaded_ringtones'] = array_values(array_unique($formData['uploaded_ringtones']));
+        // Filter out any ringtone files that no longer exist on disk
+        $existing_ringtone_files = array_map('basename', glob($ringtone_dir . "*.*") ?: []);
+        $valid_ringtones = [];
 
-        $generated_template_cfg .= "account.1.alert_info_url_enable = 1\n\n";
-        $generated_template_cfg .= "################################################\n";
-        $generated_template_cfg .= "##         Uploaded Sound Files / Provisioning  ##\n";
-        $generated_template_cfg .= "################################################\n";
         foreach ($formData['uploaded_ringtones'] as $r_file) {
-            $r_url = "{$asset_host}/ringtones/" . $r_file;
-            $generated_template_cfg .= "ringtone.url = {$r_url}\n";
+            if (in_array($r_file, $existing_ringtone_files)) {
+                $valid_ringtones[] = $r_file;
+            }
         }
-        $generated_template_cfg .= "\n";
+
+        $formData['uploaded_ringtones'] = $valid_ringtones;
+
+        if (!empty($formData['uploaded_ringtones'])) {
+            sort($formData['uploaded_ringtones'], SORT_STRING);
+            $formData['uploaded_ringtones'] = array_values(array_unique($formData['uploaded_ringtones']));
+
+            $generated_template_cfg .= "account.1.alert_info_url_enable = 1\n\n";
+            $generated_template_cfg .= "################################################\n";
+            $generated_template_cfg .= "##         Uploaded Sound Files / Provisioning  ##\n";
+            $generated_template_cfg .= "################################################\n";
+            foreach ($formData['uploaded_ringtones'] as $r_file) {
+                $r_url = "{$asset_host}/ringtones/" . $r_file;
+                $generated_template_cfg .= "ringtone.url = {$r_url}\n";
+            }
+            $generated_template_cfg .= "\n";
+        } else {
+            $generated_template_cfg .= "\n";
+        }
     } else {
         $generated_template_cfg .= "\n";
     }
@@ -1289,7 +1324,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     $cleaned_lines = [];
     foreach (explode("\n", $generated_template_cfg) as $line) {
         $trimmed = trim($line);
-        if (preg_match('/^[^=]+=\s*(%NULL%|\s*)$/i', $trimmed)) {
+        if (preg_match('/^[^=]+=\s*$/i', $trimmed)) {
             continue;
         }
         $cleaned_lines[] = $line;
@@ -1409,8 +1444,18 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
         }
 
         if (!empty($formData['uploaded_ringtones'])) {
-            sort($formData['uploaded_ringtones'], SORT_STRING);
-            $formData['uploaded_ringtones'] = array_values(array_unique($formData['uploaded_ringtones']));
+            // Filter out ringtones that do not exist on disk so UI checkboxes reflect current files
+            $existing_ringtone_files = array_map('basename', glob($ringtone_dir . "*.*") ?: []);
+            $filtered_ringtones = [];
+
+            foreach ($formData['uploaded_ringtones'] as $r_check) {
+                if (in_array($r_check, $existing_ringtone_files)) {
+                    $filtered_ringtones[] = $r_check;
+                }
+            }
+
+            sort($filtered_ringtones, SORT_STRING);
+            $formData['uploaded_ringtones'] = array_values(array_unique($filtered_ringtones));
         }
 
         if ($highest_tpl_linekey > 0) $max_linekeys = $formData['linekey_count'] = $highest_tpl_linekey;
@@ -1669,7 +1714,7 @@ $missing_referenced_ringtones = [];
 if (is_array($mac_files)) {
     foreach ($mac_files as $mf) {
         $m_base = strtolower(pathinfo($mf, PATHINFO_FILENAME));
-        if ($m_base === 'y00000000000' || strpos(strtolower($mf), 'template') !== false) {
+        if ($m_base === 'y000000000000' || strpos(strtolower($mf), 'template') !== false) {
             continue;
         }
 
@@ -3537,8 +3582,8 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
                         <strong>&#9888; Unreferenced / Deleted Ringtone(s) Detected in Phone Configs:</strong> One or more device <code>[mac].cfg</code> files assigned to this template reference ringtones that have been deleted or unchecked. Click below to issue a flush directive and sync all affected phones.
                     </div>
                     <button type="submit" name="flush_template_ringtones" class="gen-btn-danger" style="margin:0; white-space:nowrap; padding:8px 14px; font-weight:bold;" onclick="this.form.action='?display=yealink_epm#ringtone_section';">
-                        Flush Ringtones From Phones
-                    </button>
+    Flush Ringtones From Phones
+</button>
                 </div>
             </div>
 
@@ -3762,7 +3807,7 @@ $logo_filenames = array_map('basename', is_array($existing_logos) ? $existing_lo
                                                 onclick="enableMacEdit('<?= htmlspecialchars($dev['mac']) ?>')" 
                                                 style="background:none; border:none; cursor:pointer; padding:2px 4px; display:inline-flex; align-items:center;">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                                             </svg>
                                         </button>

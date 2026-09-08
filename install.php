@@ -1,6 +1,9 @@
 <?php
 if (!defined('FREEPBX_IS_AUTH')) { die('No direct script access allowed'); }
 
+global $db;
+global $amp_conf;
+
 // ============================================================================
 // 0. Module Assets & Dynamic Symlink Mapping
 // ============================================================================
@@ -13,7 +16,6 @@ $module_root = $amp_conf['AMPWEBROOT'] . '/admin/modules/' . $module_name;
  */
 function deploy_module_symlink($source, $target) {
     if (file_exists($target) || is_link($target)) {
-        // If it's a real directory and NOT a link, do not delete it to prevent losing data
         if (is_dir($target) && !is_link($target)) {
             out("Warning: A physical folder already exists at " . $target . ". Skipping link generation.");
             return false;
@@ -29,26 +31,28 @@ function deploy_module_symlink($source, $target) {
     return false;
 }
 
-// 1. Create the outward links inside /var/www/html/admin/modules/yealink_epm/
-// This maps 'tftpboot' to system /tftpboot, and 'PhoneSettings' directly to the web root location
+// Map 'tftpboot' to system /tftpboot, and 'PhoneSettings' directly to the web root location
 deploy_module_symlink('/tftpboot', $module_root . '/tftpboot');
 deploy_module_symlink($amp_conf['AMPWEBROOT'] . '/PhoneSettings', $module_root . '/PhoneSettings');
-
-
 
 // ============================================================================
 // 1. Directory Setup & Permissions
 // ============================================================================
 $tftp_dir = "/tftpboot/";
+$template_dir = "/tftpboot/templates/";
 $logo_dir = "/var/www/html/PhoneSettings/logo/";
 $ringtone_dir = "/var/www/html/PhoneSettings/ringtones/";
 
-foreach ([$logo_dir, $ringtone_dir] as $dir) {
+foreach ([$logo_dir, $ringtone_dir, $template_dir] as $dir) {
     if (!file_exists($dir)) {
-        @mkdir($dir, 0775, true);
-        @chown($dir, 'asterisk');
-        @chgrp($dir, 'asterisk');
+        if (!@mkdir($dir, 0775, true)) {
+            out("Failed to create directory: {$dir}");
+        } else {
+            out("Created directory: {$dir}");
+        }
     }
+    @chown($dir, 'asterisk');
+    @chgrp($dir, 'asterisk');
 }
 
 if (!file_exists($tftp_dir)) {
@@ -74,7 +78,28 @@ foreach ($web_symlinks as $web_symlink => $target_dir) {
 }
 
 // ============================================================================
-// 3. Isolated Directory Overrides (Prevents 403 Forbidden & Tamper Alerts)
+// 3. System Dependency Check (FFmpeg & SoX)
+// ============================================================================
+$missing_deps = [];
+
+exec('which ffmpeg 2>&1', $out_ff, $ret_ff);
+if ($ret_ff !== 0) {
+    $missing_deps[] = 'ffmpeg';
+}
+
+exec('which sox 2>&1', $out_sox, $ret_sox);
+if ($ret_sox !== 0) {
+    $missing_deps[] = 'sox';
+}
+
+if (!empty($missing_deps) && function_exists('out')) {
+    out("<warning>Missing recommended system packages: " . implode(', ', $missing_deps) . ". Audio conversion/trimming may fall back or fail.</warning>");
+} else {
+    out("Audio conversion dependencies (FFmpeg / SoX) verified.");
+}
+
+// ============================================================================
+// 4. Isolated Directory Overrides (Prevents 403 Forbidden & Tamper Alerts)
 // ============================================================================
 $htaccess_content = <<<EOT
 Options +Indexes
@@ -103,7 +128,7 @@ foreach ($target_htaccess_files as $htaccess_path) {
 }
 
 // ============================================================================
-// 4. Add Yealink Reboot / Check-Sync Stanzas to Asterisk Custom Configs
+// 5. Add Yealink Reboot / Check-Sync Stanzas to Asterisk Custom Configs
 // ============================================================================
 $notify_stanzas = <<<EOT
 
@@ -111,11 +136,15 @@ $notify_stanzas = <<<EOT
 [check-sync]
 Event=>check-sync;reboot=false
 
+[yealink-check-cfg]
+Event=>check-sync;reboot=false
+
 [reboot-yealink]
 Event=>check-sync;reboot=true
 
 [reboot]
 Event=>check-sync;reboot=true
+; --- End Yealink EPM Custom Notify Events ---
 EOT;
 
 $files_to_update = [
@@ -148,4 +177,27 @@ foreach ($files_to_update as $file) {
 if ($needs_asterisk_reload) {
     @exec("asterisk -rx 'module reload res_pjsip_notify.so' >/dev/null 2>&1");
     @exec("asterisk -rx 'module reload res_sip_notify.so' >/dev/null 2>&1");
+    out("Added custom Yealink NOTIFY handlers to Asterisk configuration.");
 }
+
+// ============================================================================
+// 6. INITIALIZE DEFAULT GLOBAL CONFIG (y000000000000.cfg)
+// ============================================================================
+$global_cfg_file = '/tftpboot/y000000000000.cfg';
+if (!file_exists($global_cfg_file)) {
+    $default_global = "#!version:1.0.0.0\n\n";
+    $default_global .= "security.user_password = admin:22222\n";
+    $default_global .= "sip.notify_reboot_enable = 0\n";
+    $default_global .= "phone_setting.zero_touch_enable = 1\n";
+    $default_global .= "action_uri.enable = 1\n";
+    $default_global .= "features.action_uri_limit_ip = any\n";
+    $default_global .= "auto_provision.mode = 7\n";
+    $default_global .= "auto_provision.dhcp_option.enable = 1\n";
+
+    file_put_contents($global_cfg_file, $default_global);
+    @chown($global_cfg_file, 'asterisk');
+    @chgrp($global_cfg_file, 'asterisk');
+    out("Generated default base global configuration (/tftpboot/y000000000000.cfg)");
+}
+
+out("Yealink EPM installation completed successfully.");

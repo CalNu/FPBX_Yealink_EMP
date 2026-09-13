@@ -1953,7 +1953,16 @@ function toggleOvpnState(ext, mac, enable) {
         </form>
     </div>
 
-    <!-- TAB 3: DEVICE MANAGER -->
+     <!-- TAB 3: DEVICE MANAGER -->
+<?php
+$ovpn_installed = false;
+if (class_exists('FreePBX') && \FreePBX::Modules()->checkStatus('ovpn_mgr')) {
+    $module_info = \FreePBX::Modules()->getInfo('ovpn_mgr');
+    if (!empty($module_info['ovpn_mgr']) && $module_info['ovpn_mgr']['status'] === MODULE_STATUS_ENABLED) {
+        $ovpn_installed = true;
+    }
+}
+?>
     <div id="tab_devices" class="gen-tab-content <?= ($formData['active_tab'] === 'tab_devices') ? 'active' : '' ?>">
         <form id="device_manager_form" method="POST">
             <input type="hidden" id="device_active_tab_field" name="active_tab" value="tab_devices">
@@ -1979,12 +1988,14 @@ function toggleOvpnState(ext, mac, enable) {
                         <th>Model</th>
                         <th>Template</th>
                         <th>Assigned Extension</th>
-                        <th style="text-align:center; width: 100px;">VPN</th>
+                        <?php if ($ovpn_installed): ?>
+                            <th style="text-align:center; width: 100px;">VPN</th>
+                        <?php endif; ?>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($managed_devices)): ?>
-                        <tr><td colspan="8" style="text-align:center; color:#777;">No configured device files found in /tftpboot/</td></tr>
+                        <tr><td colspan="<?= $ovpn_installed ? '8' : '7' ?>" style="text-align:center; color:#777;">No configured device files found in /tftpboot/</td></tr>
                     <?php else: ?>
                         <?php foreach ($managed_devices as $dev): 
                             $clean_ext = preg_replace('/[^0-9]/', '', $dev['ext']);
@@ -2061,25 +2072,25 @@ function toggleOvpnState(ext, mac, enable) {
                                     </select>
                                 </td>
 
-<td style="text-align:center;">
-    <div style="display:inline-flex; align-items:center; justify-content:center;">
-        <!-- Interactive Toggle Switch -->
-        <label class="switch" style="margin:0;">
-            <input type="checkbox" 
-                   id="vpn_toggle_<?= htmlspecialchars($dev['mac']) ?>" 
-                   <?= $vpn_enabled ? 'checked' : '' ?> 
-                   <?= empty($clean_ext) ? 'disabled' : '' ?>
-                   onchange="toggleOvpnState('<?= $clean_ext ?>', '<?= htmlspecialchars($dev['mac']) ?>', this.checked)">
-            <span class="slider"></span>
-        </label>
+				<?php if ($ovpn_installed): ?>
+                                    <td style="text-align:center;">
+                                        <div style="display:inline-flex; align-items:center; justify-content:center;">
+                                            <label class="switch" style="margin:0;">
+                                                <input type="checkbox" 
+                                                       id="vpn_toggle_<?= htmlspecialchars($dev['mac']) ?>" 
+                                                       <?= $vpn_enabled ? 'checked' : '' ?> 
+                                                       <?= empty($clean_ext) ? 'disabled' : '' ?>
+                                                       onchange="toggleOvpnState('<?= $clean_ext ?>', '<?= htmlspecialchars($dev['mac']) ?>', this.checked)">
+                                                <span class="slider"></span>
+                                            </label>
 
-        <!-- Dynamic Connection Light Indicator -->
-        <span id="vpn_status_light_<?= htmlspecialchars($dev['mac']) ?>" 
-              class="status-light <?= $vpn_enabled ? ($vpn_connected ? 'connected' : 'disconnected') : 'disabled' ?>" 
-              title="<?= $vpn_enabled ? ($vpn_connected ? 'VPN Connected' : 'VPN Disconnected') : 'VPN Disabled' ?>">
-        </span>
-    </div>
-</td>
+                                            <span id="vpn_status_light_<?= htmlspecialchars($dev['mac']) ?>" 
+                                                  class="status-light <?= $vpn_enabled ? ($vpn_connected ? 'connected' : 'disconnected') : 'disabled' ?>" 
+                                                  title="<?= $vpn_enabled ? ($vpn_connected ? 'VPN Connected' : 'VPN Disconnected') : 'VPN Disabled' ?>">
+                                            </span>
+                                        </div>
+                                    </td>
+                                <?php endif; ?>
                             </tr>
                         <?php endforeach; ?>
                     <?php endif; ?>

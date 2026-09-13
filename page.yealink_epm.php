@@ -274,19 +274,16 @@ function generateYealinkOpenVpnTarFromOvpnMgr($mac, $ext, $server_host, $server_
         $debug_log[] = "Existing certificates found in {$pkiDir}.";
     }
 
-    // 1. Build dual-path staging directory inside /tmp/
     $stagingDir = sys_get_temp_dir() . "/vpn_build_{$macClean}";
     if (is_dir($stagingDir)) {
         exec("rm -rf " . escapeshellarg($stagingDir));
     }
     @mkdir("{$stagingDir}/keys", 0775, true);
 
-    // Copy keys to root path (for legacy firmware)
     @copy($caCert, "{$stagingDir}/ca.crt");
     @copy($clientCert, "{$stagingDir}/client.crt");
     @copy($clientKey, "{$stagingDir}/client.key");
 
-    // Copy keys to keys/ subdirectory (for modern firmware)
     @copy($caCert, "{$stagingDir}/keys/ca.crt");
     @copy($clientCert, "{$stagingDir}/keys/client.crt");
     @copy($clientKey, "{$stagingDir}/keys/client.key");
@@ -314,7 +311,6 @@ function generateYealinkOpenVpnTarFromOvpnMgr($mac, $ext, $server_host, $server_
         @unlink($outputTar);
     }
 
-    // 2. Package all files (root certificates, vpn.cnf, and keys/ folder)
     $cmdTar = "cd " . escapeshellarg($stagingDir) . " && tar -cf " . escapeshellarg($outputTar) . " vpn.cnf ca.crt client.crt client.key keys/ 2>&1";
     exec($cmdTar, $o3, $r3);
     exec("rm -rf " . escapeshellarg($stagingDir));
@@ -803,10 +799,6 @@ ksort($all_extensions);
 // 7. AJAX ENDPOINTS (INCLUDES OVPN TOGGLE, AUDIO TRIMMING & SCANNING)
 // ============================================================================
 
-// ============================================================================
-// 7. AJAX ENDPOINTS (INCLUDES OVPN TOGGLE, AUDIO TRIMMING & SCANNING)
-// ============================================================================
-
 if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
     while (ob_get_level()) {
         ob_end_clean();
@@ -822,11 +814,43 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
         exit;
     }
 
-    $server_ip = !empty($saved_global_server_ip) ? $saved_global_server_ip : ($_SERVER['SERVER_ADDR'] ?? '192.168.0.52');
+    // --- DYNAMICALLY PARSE OVPN_MGR CONFIG FOR HOST AND PORT ---
+    $ovpn_host = '';
+    $ovpn_port = '1194';
+
+    $openvpn_conf = '/var/www/html/PhoneSettings/openvpn/legacy-vpn.conf';
+    if (!file_exists($openvpn_conf)) {
+        $openvpn_conf = '/etc/openvpn/server/server.conf';
+    }
+
+    if (file_exists($openvpn_conf)) {
+        $conf_content = (string)@file_get_contents($openvpn_conf);
+        
+        // Matches '# client-remote-host 1.2.3.4' saved by ovpn_mgr
+        if (preg_match('/^\#\s*client-remote-host\s+(.+)$/m', $conf_content, $mHost)) {
+            $ovpn_host = trim($mHost[1]);
+        }
+        
+        // Matches 'port 1194'
+        if (preg_match('/^port\s+(\d+)/m', $conf_content, $mPort)) {
+            $ovpn_port = trim($mPort[1]);
+        }
+    }
+
+    if (empty($ovpn_host)) {
+        $ovpn_host = !empty($saved_global_server_ip) ? $saved_global_server_ip : ($_SERVER['SERVER_ADDR'] ?? '192.168.0.52');
+    }
+
+    if (strpos($ovpn_host, '://') !== false) {
+        $ovpn_host = parse_url($ovpn_host, PHP_URL_HOST);
+    }
+    if (strpos($ovpn_host, ':') !== false) {
+        $ovpn_host = explode(':', $ovpn_host)[0];
+    }
+
     $admin_pass = !empty($saved_global_admin_pass) ? $saved_global_admin_pass : '22222';
     
-    // Certificate Common Name & Target Paths
-    $client_cn = "client-{$ext}"; // Matches OpenSSL / Easy-RSA CN structure
+    $client_cn = "client-{$ext}";
     $tar_filename = "{$mac}_{$ext}_ovpn.tar";
     $tar_path_tftp = "{$tftp_dir}openvpn_{$ext}.tar";
     $tar_path_vpnkeys = "{$vpnkeys_dir}{$tar_filename}";
@@ -842,7 +866,7 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
                     $debug_logs[] = "Script Error: " . implode(" ", $output);
                 }
             } else {
-                $generated_path = generateYealinkOpenVpnTarFromOvpnMgr($mac, $ext, $server_ip, 1194, $debug_logs);
+                $generated_path = generateYealinkOpenVpnTarFromOvpnMgr($mac, $ext, $ovpn_host, $ovpn_port, $debug_logs);
             }
         } catch (Throwable $e) {
             $generated_path = false;
@@ -856,7 +880,7 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
                 $clean_lines = array_filter($lines, function($l) {
                     return !preg_match('/^(openvpn\.|network\.vpn_enable)/i', trim($l));
                 });
-                $clean_lines[] = "openvpn.url = http://{$server_ip}/PhoneSettings/vpnkeys/{$tar_filename}";
+                $clean_lines[] = "openvpn.url = http://{$saved_global_server_ip}/PhoneSettings/vpnkeys/{$tar_filename}";
                 $clean_lines[] = "network.vpn_enable = 1";
                 @file_put_contents($cfg_path, implode("\n", $clean_lines) . "\n");
                 @chown($cfg_path, 'asterisk');
@@ -872,13 +896,9 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
             exit;
         }
     } else {
-        // --- DISABLE: Revoke Easy-RSA & OpenSSL Certs ---
-        
-        // 1. Easy-RSA Revocation (Standard OpenVPN setup)
         $easyrsa_paths = ["/etc/openvpn/easy-rsa", "/etc/openvpn/easy-rsa/3.0", "/usr/share/easy-rsa"];
         foreach ($easyrsa_paths as $er_dir) {
             if (is_dir($er_dir)) {
-                // Try revoking by client-EXT and client_EXT names
                 $cmd = "cd " . escapeshellarg($er_dir) . " && sudo ./easyrsa --batch revoke " . escapeshellarg($client_cn) . " 2>&1; " .
                        "cd " . escapeshellarg($er_dir) . " && sudo ./easyrsa --batch revoke " . escapeshellarg("client_{$ext}") . " 2>&1; " .
                        "cd " . escapeshellarg($er_dir) . " && sudo ./easyrsa gen-crl 2>&1";
@@ -886,22 +906,18 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
             }
         }
 
-        // 2. Legacy OpenSSL PKI Revocation (If generated using local helper)
         $legacy_pki = "/var/www/html/PhoneSettings/openvpn/legacy_pki";
         if (file_exists("{$legacy_pki}/issued/{$ext}.crt")) {
             @unlink("{$legacy_pki}/issued/{$ext}.crt");
             @unlink("{$legacy_pki}/private/{$ext}.key");
         }
 
-        // 3. Reload OpenVPN Service to read updated CRL immediately
         exec("sudo /usr/bin/systemctl reload openvpn@server 2>&1");
         exec("sudo /usr/bin/systemctl reload openvpn 2>&1");
 
-        // 4. Delete TAR Archives
         if (file_exists($tar_path_tftp)) { @unlink($tar_path_tftp); }
         if (file_exists($tar_path_vpnkeys)) { @unlink($tar_path_vpnkeys); }
 
-        // 5. Clean Phone Configuration File
         $cfg_path = $tftp_dir . $mac . ".cfg";
         if (file_exists($cfg_path)) {
             $lines = @file($cfg_path, FILE_IGNORE_NEW_LINES) ?: [];
@@ -2028,7 +2044,6 @@ if (is_array($existing_files)) {
 
         $ip_addr = $arp_table[$file_name_no_ext] ?? 'Unknown / Offline';
 
-        // Evaluate VPN tarball existence on disk to populate checked state on page reload
         $vpn_tar_file = "/var/www/html/PhoneSettings/vpnkeys/{$file_name_no_ext}_{$ext_num}_ovpn.tar";
         $has_vpn = file_exists($vpn_tar_file);
 

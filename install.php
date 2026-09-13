@@ -14,26 +14,29 @@ $module_root = $amp_conf['AMPWEBROOT'] . '/admin/modules/' . $module_name;
  * Safely creates a symlink from a source target to a destination link path.
  * Clears conflicting items beforehand without disrupting valid structures.
  */
-function deploy_module_symlink($source, $target) {
-    if (file_exists($target) || is_link($target)) {
-        if (is_dir($target) && !is_link($target)) {
-            out("Warning: A physical folder already exists at " . $target . ". Skipping link generation.");
-            return false;
-        }
-        @unlink($target);
-    }
+if (!function_exists('deploy_module_symlink')) {
+	function deploy_module_symlink($source, $target) {
+	    if (file_exists($target) || is_link($target)) {
+	        if (is_dir($target) && !is_link($target)) {
+	            out("Warning: A physical folder already exists at " . $target . ". Skipping link generation.");
+	            return false;
+	        }
+	        @unlink($target);
+	    }
 
-    if (@symlink($source, $target)) {
-        @chown($target, 'asterisk');
-        @chgrp($target, 'asterisk');
-        return true;
-    }
-    return false;
+	    if (@symlink($source, $target)) {
+	        @chown($target, 'asterisk');
+	        @chgrp($target, 'asterisk');
+	        return true;
+	    }
+	    return false;
+	}
 }
 
-// Map 'tftpboot' to system /tftpboot, and 'PhoneSettings' directly to the web root location
+// Map 'tftpboot' to system /tftpboot, 'PhoneSettings' directly to web root, and 'ovpn_mgr' to adjacent module
 deploy_module_symlink('/tftpboot', $module_root . '/tftpboot');
 deploy_module_symlink($amp_conf['AMPWEBROOT'] . '/PhoneSettings', $module_root . '/PhoneSettings');
+deploy_module_symlink($amp_conf['AMPWEBROOT'] . '/admin/modules/ovpn_mgr', $module_root . '/ovpn_mgr');
 
 // ============================================================================
 // 1. Directory Setup & Permissions

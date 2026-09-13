@@ -25,3 +25,7 @@ All MAC.cfg files, y000000000000.cfg, and templates are saved to the /tftpboot/ 
 •Added download function for ringtones
 
 •Added flush command when deleting ringtones in use may any mac.cfg files. This pushes a mac.cfg that deletes all ringtones and reinstalls checked ones.  Once the template is saved, it rebuilds the mac.cfg to remove the delete command so it doesn't keep deleting/reinstalling the ringtone on each reboot.
+
+1.0.1 Updates:
+• Added integration with my openvpn module https://github.com/CalNu/FPBX_OVPN_MGR
+• Multiple bug fixes.

@@ -31,9 +31,10 @@ function deploy_module_symlink($source, $target) {
     return false;
 }
 
-// Map 'tftpboot' to system /tftpboot, and 'PhoneSettings' directly to the web root location
+// Map 'tftpboot' to system /tftpboot, 'PhoneSettings' directly to web root, and 'ovpn_mgr' to adjacent module
 deploy_module_symlink('/tftpboot', $module_root . '/tftpboot');
 deploy_module_symlink($amp_conf['AMPWEBROOT'] . '/PhoneSettings', $module_root . '/PhoneSettings');
+deploy_module_symlink($amp_conf['AMPWEBROOT'] . '/admin/modules/ovpn_mgr', $module_root . '/ovpn_mgr');
 
 // ============================================================================
 // 1. Directory Setup & Permissions

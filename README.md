@@ -29,3 +29,8 @@ All MAC.cfg files, y000000000000.cfg, and templates are saved to the /tftpboot/ 
 1.0.1 Updates:
 • Added integration with my openvpn module https://github.com/CalNu/FPBX_OVPN_MGR
 • Multiple bug fixes.
+
+y1.0.3c Update:
+• Added local signature and ability to self sign module to get rid of the unsigned module nag.
+• Security hardened some folders in case server is internet facing while allowing /tftpboot/ and /PhoneSettings/ to be browsable from within the intranet.
+• Fixed some interopeabiliy between Freepbx 16 and 17

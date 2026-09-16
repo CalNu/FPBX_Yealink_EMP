@@ -27,10 +27,15 @@ All MAC.cfg files, y000000000000.cfg, and templates are saved to the /tftpboot/ 
 •Added flush command when deleting ringtones in use may any mac.cfg files. This pushes a mac.cfg that deletes all ringtones and reinstalls checked ones.  Once the template is saved, it rebuilds the mac.cfg to remove the delete command so it doesn't keep deleting/reinstalling the ringtone on each reboot.
 
 1.0.1 Updates:
+
 • Added integration with my openvpn module https://github.com/CalNu/FPBX_OVPN_MGR
+
 • Multiple bug fixes.
 
-y1.0.3c Update:
+1.0.3c Update:
+
 • Added local signature and ability to self sign module to get rid of the unsigned module nag.
+
 • Security hardened some folders in case server is internet facing while allowing /tftpboot/ and /PhoneSettings/ to be browsable from within the intranet.
+
 • Fixed some interopeabiliy between Freepbx 16 and 17

@@ -1,12 +1,14 @@
 <?php
 if (!defined('FREEPBX_IS_AUTH')) { die('No direct script access allowed'); }
 
+global $db;
 global $amp_conf;
+
+out("Starting Yealink Endpoint Manager (yealink_epm) Uninstallation...");
 
 // ============================================================================
 // 1. CLEANUP ASTERISK NOTIFY CUSTOM STANZAS
 // ============================================================================
-
 function removeSipAndPjsipNotifyCustom() {
     $files_to_clean = [
         '/etc/asterisk/sip_notify_custom.conf',
@@ -17,19 +19,14 @@ function removeSipAndPjsipNotifyCustom() {
         if (file_exists($file_path)) {
             $existing_content = file_get_contents($file_path);
 
-            // Match the opening comment AND all notify sections added by the installer
-            $pattern = '/; --- Added by Yealink Endpoint Manager Module ---\s*\[check-sync\].*?Event=>check-sync;reboot=false\s*\[yealink-check-cfg\].*?Event=>check-sync;reboot=false\s*\[reboot-yealink\].*?Event=>check-sync;reboot=true\s*\[reboot\].*?Event=>check-sync;reboot=true/s';
-            
+            $pattern = '/; --- Added by Yealink Endpoint Manager Module ---.*?; --- End Yealink EPM Custom Notify Events ---/s';
             $cleaned_content = preg_replace($pattern, '', $existing_content);
 
-            // Fallback backup regex: Strips any remaining stanzas created by install.php
             $stanzas_to_strip = [
                 '/; --- Added by Yealink Endpoint Manager Module ---/i',
                 '/\[yealink-check-cfg\]\s*Event=>check-sync;reboot=false/i',
                 '/\[reboot-yealink\]\s*Event=>check-sync;reboot=true/i',
-                '/\[check-sync\]\s*Event=>check-sync;reboot=false/i',
-                '/\[reboot\]\s*Event=>check-sync;reboot=true/i',
-		'/; --- End Yealink EPM Custom Notify Events ---/i'
+                '/; --- End Yealink EPM Custom Notify Events ---/i'
             ];
 
             foreach ($stanzas_to_strip as $stanza_pattern) {
@@ -42,13 +39,15 @@ function removeSipAndPjsipNotifyCustom() {
         }
     }
 
-    // Reload Asterisk SIP and PJSIP NOTIFY configurations
     exec("asterisk -rx 'module reload res_sip_notify.so' 2>&1");
     exec("asterisk -rx 'module reload res_pjsip_notify.so' 2>&1");
+    out("Removed custom Yealink NOTIFY handlers from Asterisk configuration.");
 }
 
+removeSipAndPjsipNotifyCustom();
+
 // ============================================================================
-// 2. REMOVE MODULE SYMLINKS (Safe — does not touch target folder content)
+// 2. REMOVE MODULE SYMLINKS
 // ============================================================================
 $module_name = 'yealink_epm'; 
 $module_root = $amp_conf['AMPWEBROOT'] . '/admin/modules/' . $module_name;
@@ -58,7 +57,8 @@ $symlinks_to_remove = [
     "/var/www/html/tftp",
     "/tftpboot/PhoneSettings",
     $module_root . '/tftpboot',
-    $module_root . '/PhoneSettings'
+    $module_root . '/PhoneSettings',
+    $module_root . '/ovpn_mgr'
 ];
 
 foreach ($symlinks_to_remove as $link) {
@@ -66,6 +66,7 @@ foreach ($symlinks_to_remove as $link) {
         @unlink($link);
     }
 }
+out("Cleaned up module symlinks.");
 
 // ============================================================================
 // 3. REMOVE CUSTOM HTACCESS OVERRIDES
@@ -84,5 +85,14 @@ foreach ($htaccess_files as $htaccess_path) {
     }
 }
 
-// Execute system-level cleanup
-removeSipAndPjsipNotifyCustom();
+// ============================================================================
+// 4. DROP DATABASE TABLES
+// ============================================================================
+try {
+    $db->query("DROP TABLE IF EXISTS yealink_epm_devices;");
+    out("Dropped database table [yealink_epm_devices].");
+} catch (\Exception $e) {
+    out("Error dropping database table: " . $e->getMessage());
+}
+
+out("Yealink EPM uninstallation completed.");

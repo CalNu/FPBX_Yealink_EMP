@@ -1,11 +1,11 @@
 <module>
 	<rawname>yealink_epm</rawname>
 	<name>Yealink Endpoint Manager</name>
-	<version>1.0.1</version>
+	<version>1.0.3c</version>
 	<publisher>HG</publisher>
 	<license>GPLv3</license>
 	<type>setup</type>
-	<category>Settings</category>
+	<category>Custom</category>
 	<description>Custom Yealink Endpoint Manager and Provisioning Module</description>
 	<menuitems>
 		<yealink_epm>Yealink Endpoint Manager</yealink_epm>
@@ -15,5 +15,5 @@
 		<version>16.0</version>
 		<version>17.0</version>
 	</supported>
-	<location>local</location>
+	<more-info>https://github.com/CalNu/FPBX_Yealink_EMP</more-info>
 </module>

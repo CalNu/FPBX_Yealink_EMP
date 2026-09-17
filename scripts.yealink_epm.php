@@ -98,6 +98,36 @@ if (!file_exists($tftp_dir)) {
 }
 
 // ============================================================================
+// 1.5. YEALINK "GLOBAL" (y-config) FILENAMES
+// ============================================================================
+// Older Yealink phones (e.g. T28P) only ever look for y000000000000.cfg as
+// their common/global config. Newer generations each look for their OWN
+// numbered "y" file instead - a phone will simply never see global settings
+// saved only to y000000000000.cfg. Global Settings therefore has to be
+// written to (and deleted from) every filename below, not just the
+// original one, or newer phones silently get no common config at all.
+if (!function_exists('yealinkGlobalCfgMap')) {
+    function yealinkGlobalCfgMap() {
+        return [
+            'y000000000000' => 'Legacy (T28 and other original-generation models)',
+            'y000000000028' => 'T4X Legacy - T46G',
+            'y000000000029' => 'T4X Legacy - T42G',
+            'y000000000066' => 'T4X S-Series - T46S',
+            'y000000000067' => 'T4X S-Series - T42S',
+            'y000000000095' => 'T5X Series - T53W / T53',
+            'y000000000096' => 'T5X Series - T54W',
+            'y000000000108' => 'T4X U-Series - T46U',
+            'y000000000109' => 'T4X U-Series - T48U',
+        ];
+    }
+}
+if (!function_exists('isYealinkGlobalCfgBasename')) {
+    function isYealinkGlobalCfgBasename($basename) {
+        return array_key_exists(strtolower((string)$basename), yealinkGlobalCfgMap());
+    }
+}
+
+// ============================================================================
 // 2. DETECT SERVER TIMEZONE & YEALINK MAPPING
 // ============================================================================
 
@@ -475,7 +505,7 @@ function rebuildDevicesForTemplate($tpl_filename, $tftp_dir, $template_dir, $sav
     if (is_array($all_cfg_files)) {
         foreach ($all_cfg_files as $cf) {
             $mname = strtolower(pathinfo($cf, PATHINFO_FILENAME));
-            if ($mname === 'y000000000000' || strpos(strtolower($cf), 'template') !== false) {
+            if (isYealinkGlobalCfgBasename($mname) || strpos(strtolower($cf), 'template') !== false) {
                 continue;
             }
 
@@ -633,13 +663,15 @@ function generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_ta
         $cfg .= trim($formData['custom_inputs_global']) . "\n\n";
     }
 
-    @file_put_contents($tftp_dir . "y000000000000.cfg", $cfg);
-    @chown($tftp_dir . "y000000000000.cfg", 'asterisk');
+    foreach (array_keys(yealinkGlobalCfgMap()) as $global_basename) {
+        @file_put_contents($tftp_dir . $global_basename . ".cfg", $cfg);
+        @chown($tftp_dir . $global_basename . ".cfg", 'asterisk');
+    }
     return $cfg;
 }
 
 // ============================================================================
-// 6. READ GLOBAL CONFIGURATION (y000000000000.cfg) & DATABASE DATA
+// 6. READ GLOBAL CONFIGURATION (y-configs) & DATABASE DATA
 // ============================================================================
 
 $saved_global_server_ip = $default_server_target;
@@ -1096,7 +1128,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'scan_network') {
     if (is_array($existing_cfg_files)) {
         foreach ($existing_cfg_files as $cfg_file) {
             $mac_name = strtolower(pathinfo($cfg_file, PATHINFO_FILENAME));
-            if ($mac_name !== 'y000000000000') {
+            if (!isYealinkGlobalCfgBasename($mac_name)) {
                 $existing_macs[] = $mac_name;
             }
         }
@@ -1175,7 +1207,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'add_scanned_device') {
             if (is_array($existing_cfgs)) {
                 foreach ($existing_cfgs as $ecfg) {
                     $emac = strtolower(pathinfo($ecfg, PATHINFO_FILENAME));
-                    if ($emac === 'y000000000000' || strpos($emac, 'template') !== false || $emac === $scanned_mac) {
+                    if (isYealinkGlobalCfgBasename($emac) || strpos($emac, 'template') !== false || $emac === $scanned_mac) {
                         continue;
                     }
                     $elines = @file($ecfg, FILE_IGNORE_NEW_LINES);
@@ -1291,7 +1323,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_target_file']) 
     }
 
     if ($file_type === 'global') {
-        $full_path = $tftp_dir . "y000000000000.cfg";
+        // "Delete Global Settings" removes every y-config file, since a
+        // save wrote the same content to all of them - leaving newer
+        // phones' files behind would leave stale global settings in
+        // place for them while the legacy file (and the UI) shows deleted.
+        $deleted_any_global = false;
+        foreach (array_keys(yealinkGlobalCfgMap()) as $global_basename) {
+            $global_path = $tftp_dir . $global_basename . ".cfg";
+            if (file_exists($global_path) && is_file($global_path)) {
+                if (@unlink($global_path)) {
+                    $deleted_any_global = true;
+                }
+            }
+        }
+        if ($deleted_any_global) {
+            $status = "Successfully deleted all Global Settings y-config files.";
+        }
+        $full_path = ""; // already handled above - skip the generic single-file path below
     } elseif ($file_type === 'template') {
         $full_path = $template_dir . $target_file;
     } elseif ($file_type === 'cfg') {
@@ -1836,7 +1884,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
         if (is_array($all_cfg_files)) {
             foreach ($all_cfg_files as $cf) {
                 $mname = strtolower(pathinfo($cf, PATHINFO_FILENAME));
-                if ($mname !== 'y000000000000' && strpos(strtolower($cf), 'template') === false) {
+                if (!isYealinkGlobalCfgBasename($mname) && strpos(strtolower($cf), 'template') === false) {
                     $all_macs[] = $mname;
                 }
             }
@@ -2043,7 +2091,7 @@ $missing_referenced_ringtones = [];
 if (is_array($mac_files)) {
     foreach ($mac_files as $mf) {
         $m_base = strtolower(pathinfo($mf, PATHINFO_FILENAME));
-        if ($m_base === 'y000000000000' || strpos(strtolower($mf), 'template') !== false) {
+        if (isYealinkGlobalCfgBasename($m_base) || strpos(strtolower($mf), 'template') !== false) {
             continue;
         }
 
@@ -2136,7 +2184,7 @@ if (is_array($existing_files)) {
         $b_name = basename($file_path);
         $file_name_no_ext = strtolower(pathinfo($b_name, PATHINFO_FILENAME));
         
-        if ($file_name_no_ext === 'y000000000000' || strpos(strtolower($b_name), 'template') !== false) continue;
+        if (isYealinkGlobalCfgBasename($file_name_no_ext) || strpos(strtolower($b_name), 'template') !== false) continue;
 
         $ext_num = "";
         $ext_label = "";
@@ -2264,7 +2312,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['save_global'])) {
     }
 
     $generated_common_cfg = generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_target, $tftp_dir);
-    $status = "Saved y000000000000.cfg to {$tftp_dir}";
+    $status = "Saved Global Settings to " . count(yealinkGlobalCfgMap()) . " y-config file(s) in {$tftp_dir}";
 }
 
 $max_dialnow_slots = (int)($formData['dialnow_count'] ?? 1);

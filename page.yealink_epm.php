@@ -908,7 +908,7 @@ function switchTab(tabId) {
     }
 
     function confirmDeleteGlobalConfig() {
-        if (confirm("Are you sure you want to permanently delete y000000000000.cfg from /tftpboot/?")) {
+        if (confirm("Are you sure you want to permanently delete Global Settings? This removes the y-config file for EVERY phone generation (y000000000000.cfg and all newer model-specific y-configs) from /tftpboot/.")) {
             document.getElementById('target_filename').value = "y000000000000.cfg";
             document.getElementById('target_file_type').value = "global";
             document.getElementById('delete_file_form').submit();
@@ -1572,7 +1572,7 @@ function handleSignModuleSubmit(event) {
 
 <div class="gen-tab-bar" style="display: flex; justify-content: space-between; align-items: center;">
     <div style="display: flex;">
-        <div id="btn_tab_global" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_global') ? 'active' : '' ?>" onclick="switchTab('tab_global')">Global Settings (y000000000000.cfg)</div>
+        <div id="btn_tab_global" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_global') ? 'active' : '' ?>" onclick="switchTab('tab_global')">Global Settings (y-configs)</div>
         <div id="btn_tab_template" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_template') ? 'active' : '' ?>" onclick="switchTab('tab_template')">Template Manager (template.cfg)</div>
         <div id="btn_tab_devices" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_devices') ? 'active' : '' ?>" onclick="switchTab('tab_devices')">Device Manager</div>
     </div>
@@ -1766,19 +1766,31 @@ function handleSignModuleSubmit(event) {
             </div>
 
             <h3 class="gen-section-title">Global Custom Key / Value Additions</h3>
-            <label>Add raw global Yealink configuration flags for y000000000000.cfg (One per line):</label>
+            <label>Add raw global Yealink configuration flags (applied to every y-config file, one per line):</label>
             <textarea name="custom_inputs_global" class="gen-textarea"><?= htmlspecialchars($formData['custom_inputs_global']) ?></textarea>
 
             <?php if (!empty($generated_common_cfg)): ?>
-                <h3 class="gen-section-title">Generated Common Output (y000000000000.cfg)</h3>
+                <h3 class="gen-section-title">Generated Common Output (written to all y-configs below)</h3>
                 <textarea readonly class="gen-textarea" style="height:300px;"><?= htmlspecialchars($generated_common_cfg) ?></textarea>
+                <p style="font-size:12px; color:#666; margin-top:6px;">
+                    This exact content is written to every phone-generation's y-config file so all supported models pick up Global Settings, not just the legacy one:
+                    <?php foreach (yealinkGlobalCfgMap() as $g_basename => $g_label): ?>
+                        <code style="margin-right:6px;" title="<?= htmlspecialchars($g_label) ?>"><?= htmlspecialchars($g_basename) ?>.cfg</code>
+                    <?php endforeach; ?>
+                </p>
             <?php endif; ?>
 
             <br>
             <div style="display: flex; gap: 10px; margin-top: 10px;">
                 <button type="submit" name="save_global" class="gen-btn" style="background: #28a745; margin-top:0;">Save Global Settings to /tftpboot/</button>
-                <?php if (file_exists($tftp_dir . "y000000000000.cfg")): ?>
-                    <button type="button" class="gen-btn-danger" style="margin-top:0;" onclick="confirmDeleteGlobalConfig()">Delete y000000000000.cfg</button>
+                <?php
+                $any_global_cfg_exists = false;
+                foreach (array_keys(yealinkGlobalCfgMap()) as $g_basename) {
+                    if (file_exists($tftp_dir . $g_basename . ".cfg")) { $any_global_cfg_exists = true; break; }
+                }
+                ?>
+                <?php if ($any_global_cfg_exists): ?>
+                    <button type="button" class="gen-btn-danger" style="margin-top:0;" onclick="confirmDeleteGlobalConfig()">Delete Global Settings (all y-configs)</button>
                 <?php endif; ?>
             </div>
         </form>

@@ -156,6 +156,9 @@ DirectoryIndex disabled
     Allow from 172.16.0.0/12
     Allow from 192.168.0.0/16
 </IfModule>
+
+IndexIgnore openvpn ovpn_mgr vpnkeys yealink_epm
+
 EOT;
 
 $target_htaccess_files = [

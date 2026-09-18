@@ -100,12 +100,6 @@ if (!file_exists($tftp_dir)) {
 // ============================================================================
 // 1.5. YEALINK "GLOBAL" (y-config) FILENAMES
 // ============================================================================
-// Older Yealink phones (e.g. T28P) only ever look for y000000000000.cfg as
-// their common/global config. Newer generations each look for their OWN
-// numbered "y" file instead - a phone will simply never see global settings
-// saved only to y000000000000.cfg. Global Settings therefore has to be
-// written to (and deleted from) every filename below, not just the
-// original one, or newer phones silently get no common config at all.
 if (!function_exists('yealinkGlobalCfgMap')) {
     function yealinkGlobalCfgMap() {
         return [
@@ -951,9 +945,6 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
                 }
             }
 
-            // Fall back to the built-in generator whenever ovpn_mgr's script is missing,
-            // OR present but failed (e.g. no sudo rights, script removed/rewritten,
-            // permission model changed). Don't rely on file_exists() alone to decide.
             if (!$generated_path) {
                 $generated_path = generateYealinkOpenVpnTarFromOvpnMgr($mac, $ext, $ovpn_host, $ovpn_port, $debug_logs);
             }
@@ -976,7 +967,6 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
             }
             sendSipNotify($ext, 'yealink-check-cfg', '', $admin_pass);
 
-            // Check active live connection state in Asterisk / VPN logs
             $is_connected = false;
             if (isset($online_exts[$ext])) {
                 $contact_uri = $online_exts[$ext]['via'] ?? '';
@@ -1323,10 +1313,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_target_file']) 
     }
 
     if ($file_type === 'global') {
-        // "Delete Global Settings" removes every y-config file, since a
-        // save wrote the same content to all of them - leaving newer
-        // phones' files behind would leave stale global settings in
-        // place for them while the legacy file (and the UI) shows deleted.
         $deleted_any_global = false;
         foreach (array_keys(yealinkGlobalCfgMap()) as $global_basename) {
             $global_path = $tftp_dir . $global_basename . ".cfg";
@@ -1339,7 +1325,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_target_file']) 
         if ($deleted_any_global) {
             $status = "Successfully deleted all Global Settings y-config files.";
         }
-        $full_path = ""; // already handled above - skip the generic single-file path below
+        $full_path = "";
     } elseif ($file_type === 'template') {
         $full_path = $template_dir . $target_file;
     } elseif ($file_type === 'cfg') {
@@ -1521,6 +1507,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     } else {
         sort($formData['uploaded_ringtones'], SORT_STRING);
         $formData['uploaded_ringtones'] = array_values(array_unique($formData['uploaded_ringtones']));
+    }
+
+    // Process new logo uploads directly during template save
+    if (isset($_FILES['logo_upload']) && $_FILES['logo_upload']['error'] === UPLOAD_ERR_OK) {
+        $orig_logo_name = basename($_FILES['logo_upload']['name']);
+        $clean_logo_name = preg_replace('/[^a-zA-Z0-9_\-\.]/', '', $orig_logo_name);
+        
+        if (!file_exists($logo_dir)) {
+            @mkdir($logo_dir, 0775, true);
+            @chown($logo_dir, 'asterisk');
+        }
+
+        $target_logo_path = $logo_dir . $clean_logo_name;
+
+        if (move_uploaded_file($_FILES['logo_upload']['tmp_name'], $target_logo_path)) {
+            @chown($target_logo_path, 'asterisk');
+            $formData['logo_file'] = $clean_logo_name;
+        }
     }
 
     $formData["linekey_1_type"] = "15";
@@ -2127,14 +2131,12 @@ if (is_array($existing_templates)) {
     }
 }
 
-// Fetch REAL-TIME active connected OpenVPN clients directly from the management interface
 $ovpn_connected_exts = [];
 $ovpn_connected_macs = [];
 $ovpn_connected_ips  = [];
 
 $status_output = '';
 
-// 1. Attempt connection via OpenVPN Management TCP Socket
 $fp = @fsockopen('127.0.0.1', 7505, $errno, $errstr, 1);
 if ($fp) {
     fputs($fp, "status\n");
@@ -2146,7 +2148,6 @@ if ($fp) {
     fclose($fp);
 }
 
-// 2. Fallback: Parse openvpn-status.log if socket connection is unavailable
 if (empty($status_output)) {
     $status_file = file_exists('/var/log/openvpn/openvpn-status.log') 
         ? '/var/log/openvpn/openvpn-status.log' 
@@ -2157,7 +2158,6 @@ if (empty($status_output)) {
     }
 }
 
-// Parse live CLIENT_LIST lines
 if (!empty($status_output)) {
     $lines = explode("\n", $status_output);
     foreach ($lines as $line) {
@@ -2223,14 +2223,12 @@ if (is_array($existing_files)) {
         $vpn_tar_file = "/var/www/html/PhoneSettings/vpnkeys/{$file_name_no_ext}_{$ext_num}_ovpn.tar";
         $has_vpn = file_exists($vpn_tar_file);
 
-        // Verify active OpenVPN connection against real-time socket data & Asterisk PJSIP contact status
         $is_vpn_connected = false;
         if ($has_vpn) {
             $clean_mac = strtolower($file_name_no_ext);
             $clean_ext_cn = strtolower("client-{$ext_num}");
             $pjsip_online = isset($online_exts[$ext_num]);
 
-            // Must match active client list in OpenVPN memory OR have an active PJSIP registration over the VPN
             if (
                 isset($ovpn_connected_macs[$clean_mac]) || 
                 isset($ovpn_connected_exts[$clean_ext_cn]) || 
@@ -2240,7 +2238,6 @@ if (is_array($existing_files)) {
                 $is_vpn_connected = true;
             }
         }
-
 
         $managed_devices[] = [
             'mac'               => $file_name_no_ext,

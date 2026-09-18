@@ -828,27 +828,28 @@ function toggleOvpnState(ext, mac, enable) {
         calculateTotalRingtonePayloadSize();
     }
 
-function switchTab(tabId) {
-    var contents = document.querySelectorAll('.gen-tab-content');
-    var buttons = document.querySelectorAll('.gen-tab-btn');
+    function switchTab(tabId) {
+        var contents = document.querySelectorAll('.gen-tab-content');
+        var buttons = document.querySelectorAll('.gen-tab-btn');
 
-    contents.forEach(function(el) { el.classList.remove('active'); });
-    buttons.forEach(function(el) { el.classList.remove('active'); });
+        contents.forEach(function(el) { el.classList.remove('active'); });
+        buttons.forEach(function(el) { el.classList.remove('active'); });
 
-    var targetTab = document.getElementById(tabId);
-    var targetBtn = document.getElementById('btn_' + tabId);
+        var targetTab = document.getElementById(tabId);
+        var targetBtn = document.getElementById('btn_' + tabId);
 
-    if (targetTab) targetTab.classList.add('active');
-    if (targetBtn) targetBtn.classList.add('active');
+        if (targetTab) targetTab.classList.add('active');
+        if (targetBtn) targetBtn.classList.add('active');
 
-    var activeField = document.getElementById('active_tab_field');
-    var deviceActiveField = document.getElementById('device_active_tab_field');
-    var loadTplField = document.getElementById('load_tpl_active_tab_field');
+        var activeField = document.getElementById('active_tab_field');
+        var deviceActiveField = document.getElementById('device_active_tab_field');
+        var loadTplField = document.getElementById('load_tpl_active_tab_field');
 
-    if (activeField) activeField.value = tabId;
-    if (deviceActiveField) deviceActiveField.value = tabId;
-    if (loadTplField) loadTplField.value = tabId;
-}
+        if (activeField) activeField.value = tabId;
+        if (deviceActiveField) deviceActiveField.value = tabId;
+        if (loadTplField) loadTplField.value = tabId;
+    }
+
     function toggleSelectAllPhones(master) {
         var checkboxes = document.querySelectorAll('.phone_checkbox');
         checkboxes.forEach(cb => cb.checked = master.checked);
@@ -963,74 +964,74 @@ function switchTab(tabId) {
         }
     }
 
-function handleModelSelect(model) {
-    var lineElem = document.getElementById('select_linekey_count');
-    var baseMemElem = document.getElementById('field_base_mem_keys');
-    
-    var modelSpecs = {
-        "manual": { keys: 1,  lines: 1 },
-        "T19P":   { keys: 1,  lines: 1 },
-        "T21P":   { keys: 2,  lines: 2 },
-        "T23G":   { keys: 3,  lines: 3 },
-        "T27G":   { keys: 21, lines: 6 },
-        "T28P":   { keys: 6,  lines: 6 },
-        "T29G":   { keys: 27, lines: 16 },
-        "T30":    { keys: 1,  lines: 1 },
-        "T31G":   { keys: 2,  lines: 2 },
-        "T33G":   { keys: 4,  lines: 4 },
-        "T40P":   { keys: 3,  lines: 3 },
-        "T41S":   { keys: 15, lines: 6 },
-        "T42S":   { keys: 15, lines: 6 },
-        "T43U":   { keys: 21, lines: 12 },
-        "T46S":   { keys: 27, lines: 16 },
-        "T48S":   { keys: 29, lines: 16 },
-        "T53W":   { keys: 21, lines: 12 },
-        "T54W":   { keys: 27, lines: 16 },
-        "T57W":   { keys: 29, lines: 16 },
-        "T58A":   { keys: 27, lines: 16 },
-        "VP59":   { keys: 27, lines: 16 }
-    };
-
-    var spec = modelSpecs[model] || modelSpecs["manual"];
-
-    if (lineElem) {
-        lineElem.value = spec.keys;
-        updateLinekeyVisibility(spec.keys);
-    }
-
-    restrictLineDropdownOptions(spec.lines);
-
-    if (baseMemElem && spec.mem >= 0) {
-        baseMemElem.value = spec.mem;
-    }
-    calculateTotalMemoryKeys();
-    updateModelSpecsInfo(model);
-}
-
-function restrictLineDropdownOptions(maxLines) {
-    for (var i = 1; i <= 29; i++) {
-        var selectElem = document.querySelector('select[name="linekey_' + i + '_line"]');
-        if (!selectElem) {
-            continue;
-        }
-
-        var currentVal = selectElem.value;
-        selectElem.innerHTML = '';
+    function handleModelSelect(model) {
+        var lineElem = document.getElementById('select_linekey_count');
+        var baseMemElem = document.getElementById('field_base_mem_keys');
         
-        for (var l = 1; l <= maxLines; l++) {
-            var opt = document.createElement('option');
-            opt.value = l;
-            opt.textContent = 'Line ' + l;
-            selectElem.appendChild(opt);
+        var modelSpecs = {
+            "manual": { keys: 1,  lines: 1 },
+            "T19P":   { keys: 1,  lines: 1 },
+            "T21P":   { keys: 2,  lines: 2 },
+            "T23G":   { keys: 3,  lines: 3 },
+            "T27G":   { keys: 21, lines: 6 },
+            "T28P":   { keys: 6,  lines: 6 },
+            "T29G":   { keys: 27, lines: 16 },
+            "T30":    { keys: 1,  lines: 1 },
+            "T31G":   { keys: 2,  lines: 2 },
+            "T33G":   { keys: 4,  lines: 4 },
+            "T40P":   { keys: 3,  lines: 3 },
+            "T41S":   { keys: 15, lines: 6 },
+            "T42S":   { keys: 15, lines: 6 },
+            "T43U":   { keys: 21, lines: 12 },
+            "T46S":   { keys: 27, lines: 16 },
+            "T48S":   { keys: 29, lines: 16 },
+            "T53W":   { keys: 21, lines: 12 },
+            "T54W":   { keys: 27, lines: 16 },
+            "T57W":   { keys: 29, lines: 16 },
+            "T58A":   { keys: 27, lines: 16 },
+            "VP59":   { keys: 27, lines: 16 }
+        };
+
+        var spec = modelSpecs[model] || modelSpecs["manual"];
+
+        if (lineElem) {
+            lineElem.value = spec.keys;
+            updateLinekeyVisibility(spec.keys);
         }
 
-        if (parseInt(currentVal, 10) <= maxLines) {
-            selectElem.value = currentVal;
-        } else {
-            selectElem.value = '1';
+        restrictLineDropdownOptions(spec.lines);
+
+        if (baseMemElem && spec.mem >= 0) {
+            baseMemElem.value = spec.mem;
+        }
+        calculateTotalMemoryKeys();
+        updateModelSpecsInfo(model);
+    }
+
+    function restrictLineDropdownOptions(maxLines) {
+        for (var i = 1; i <= 29; i++) {
+            var selectElem = document.querySelector('select[name="linekey_' + i + '_line"]');
+            if (!selectElem) {
+                continue;
+            }
+
+            var currentVal = selectElem.value;
+            selectElem.innerHTML = '';
+            
+            for (var l = 1; l <= maxLines; l++) {
+                var opt = document.createElement('option');
+                opt.value = l;
+                opt.textContent = 'Line ' + l;
+                selectElem.appendChild(opt);
+            }
+
+            if (parseInt(currentVal, 10) <= maxLines) {
+                selectElem.value = currentVal;
+            } else {
+                selectElem.value = '1';
+            }
         }
     }
-}
 
     function handleExpSelect() {
         calculateTotalMemoryKeys();
@@ -1272,79 +1273,79 @@ function restrictLineDropdownOptions(maxLines) {
         }
     });
 
-document.addEventListener("DOMContentLoaded", function() {
-    document.querySelectorAll('input[name="uploaded_ringtones[]"]').forEach(function(cb) {
-        initialRingtoneStates[cb.value] = cb.checked;
+    document.addEventListener("DOMContentLoaded", function() {
+        document.querySelectorAll('input[name="uploaded_ringtones[]"]').forEach(function(cb) {
+            initialRingtoneStates[cb.value] = cb.checked;
+        });
+
+        checkUncheckedRingtonesState();
+
+        if (window.location.hash === '#tab_devices' || '<?= $formData['active_tab'] ?>' === 'tab_devices') {
+            switchTab('tab_devices');
+        } else if (window.location.hash === '#tab_template' || '<?= $formData['active_tab'] ?>' === 'tab_template' || window.location.hash === '#ringtone_section') {
+            switchTab('tab_template');
+            if (window.location.hash === '#ringtone_section') {
+                var elem = document.getElementById('ringtone_section');
+                if (elem) { elem.scrollIntoView({ behavior: 'smooth' }); }
+            }
+        } else {
+            switchTab('tab_global');
+        }
+
+        var modelElem = document.getElementById('select_phone_model');
+        if (modelElem) {
+            handleModelSelect(modelElem.value);
+            updateModelSpecsInfo(modelElem.value);
+        }
+
+        enforceUniqueExtensionSelections();
     });
 
-    checkUncheckedRingtonesState();
+    function handleSignModuleSubmit(event) {
+        var submitBtn = document.getElementById('sign_submit_btn');
+        var cancelBtn = document.getElementById('sign_cancel_btn');
+        var closeX = document.getElementById('sign_modal_close_x');
+        var instructions = document.getElementById('sign_modal_instructions');
+        var progressContainer = document.getElementById('sign_progress_container');
+        var progressBar = document.getElementById('sign_progress_bar');
+        var statusText = document.getElementById('sign_status_text');
 
-    if (window.location.hash === '#tab_devices' || '<?= $formData['active_tab'] ?>' === 'tab_devices') {
-        switchTab('tab_devices');
-    } else if (window.location.hash === '#tab_template' || '<?= $formData['active_tab'] ?>' === 'tab_template' || window.location.hash === '#ringtone_section') {
-        switchTab('tab_template');
-        if (window.location.hash === '#ringtone_section') {
-            var elem = document.getElementById('ringtone_section');
-            if (elem) { elem.scrollIntoView({ behavior: 'smooth' }); }
+        if (submitBtn) submitBtn.disabled = true;
+        if (cancelBtn) cancelBtn.disabled = true;
+        if (closeX) closeX.style.display = 'none';
+
+        if (instructions) {
+            instructions.innerHTML = '<strong>Signing in progress...</strong> Please do not close or refresh this window.';
         }
-    } else {
-        switchTab('tab_global');
-    }
 
-    var modelElem = document.getElementById('select_phone_model');
-    if (modelElem) {
-        handleModelSelect(modelElem.value);
-        updateModelSpecsInfo(modelElem.value);
-    }
+        if (progressContainer) progressContainer.style.display = 'block';
 
-    enforceUniqueExtensionSelections();
-});
+        var stages = [
+            { pct: 20, msg: "Cleaning stale signature caches..." },
+            { pct: 50, msg: "Generating native SHA-256 file hashes..." },
+            { pct: 75, msg: "Writing module.sig..." },
+            { pct: 90, msg: "Purging core & framework notifications..." },
+            { pct: 95, msg: "Refreshing module signatures & reloading FreePBX..." }
+        ];
 
-function handleSignModuleSubmit(event) {
-    var submitBtn = document.getElementById('sign_submit_btn');
-    var cancelBtn = document.getElementById('sign_cancel_btn');
-    var closeX = document.getElementById('sign_modal_close_x');
-    var instructions = document.getElementById('sign_modal_instructions');
-    var progressContainer = document.getElementById('sign_progress_container');
-    var progressBar = document.getElementById('sign_progress_bar');
-    var statusText = document.getElementById('sign_status_text');
+        var currentStage = 0;
 
-    if (submitBtn) submitBtn.disabled = true;
-    if (cancelBtn) cancelBtn.disabled = true;
-    if (closeX) closeX.style.display = 'none';
-
-    if (instructions) {
-        instructions.innerHTML = '<strong>Signing in progress...</strong> Please do not close or refresh this window.';
-    }
-
-    if (progressContainer) progressContainer.style.display = 'block';
-
-    var stages = [
-        { pct: 20, msg: "Cleaning stale signature caches..." },
-        { pct: 50, msg: "Generating native SHA-256 file hashes..." },
-        { pct: 75, msg: "Writing module.sig..." },
-        { pct: 90, msg: "Purging core & framework notifications..." },
-        { pct: 95, msg: "Refreshing module signatures & reloading FreePBX..." }
-    ];
-
-    var currentStage = 0;
-
-    var progressInterval = setInterval(function() {
-        if (currentStage < stages.length) {
-            var stage = stages[currentStage];
-            if (progressBar) {
-                progressBar.style.width = stage.pct + '%';
-                progressBar.innerText = stage.pct + '%';
+        var progressInterval = setInterval(function() {
+            if (currentStage < stages.length) {
+                var stage = stages[currentStage];
+                if (progressBar) {
+                    progressBar.style.width = stage.pct + '%';
+                    progressBar.innerText = stage.pct + '%';
+                }
+                if (statusText) {
+                    statusText.innerText = stage.msg;
+                }
+                currentStage++;
+            } else {
+                clearInterval(progressInterval);
             }
-            if (statusText) {
-                statusText.innerText = stage.msg;
-            }
-            currentStage++;
-        } else {
-            clearInterval(progressInterval);
-        }
-    }, 1200);
-}
+        }, 1200);
+    }
 </script>
 
 <form id="delete_file_form" method="POST" style="display:none;">
@@ -1564,28 +1565,27 @@ function handleSignModuleSubmit(event) {
 
     <?php if (!empty($status)) echo "<div class='gen-alert'>{$status}</div>"; ?>
 
-<?php if (!empty($elevationError)): ?>
-    <div class="warning-box" style="margin-bottom: 15px; border-left: 4px solid #dc3545; padding: 10px;">
-        &#9888; <?= htmlspecialchars($elevationError) ?>
-    </div>
-<?php endif; ?>
+    <?php if (!empty($elevationError)): ?>
+        <div class="warning-box" style="margin-bottom: 15px; border-left: 4px solid #dc3545; padding: 10px;">
+            &#9888; <?= htmlspecialchars($elevationError) ?>
+        </div>
+    <?php endif; ?>
 
-<div class="gen-tab-bar" style="display: flex; justify-content: space-between; align-items: center;">
-    <div style="display: flex;">
-        <div id="btn_tab_global" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_global') ? 'active' : '' ?>" onclick="switchTab('tab_global')">Global Settings (y-configs)</div>
-        <div id="btn_tab_template" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_template') ? 'active' : '' ?>" onclick="switchTab('tab_template')">Template Manager (template.cfg)</div>
-        <div id="btn_tab_devices" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_devices') ? 'active' : '' ?>" onclick="switchTab('tab_devices')">Device Manager</div>
+    <div class="gen-tab-bar" style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex;">
+            <div id="btn_tab_global" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_global') ? 'active' : '' ?>" onclick="switchTab('tab_global')">Global Settings (y-configs)</div>
+            <div id="btn_tab_template" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_template') ? 'active' : '' ?>" onclick="switchTab('tab_template')">Template Manager (template.cfg)</div>
+            <div id="btn_tab_devices" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_devices') ? 'active' : '' ?>" onclick="switchTab('tab_devices')">Device Manager</div>
+        </div>
+        
+        <?php if ($show_resign_button): ?>
+            <div style="padding-right: 10px; margin-top: 5px;">
+                <button type="button" class="btn btn-danger" style="margin: 0; font-weight: bold; background-color: #db001a; border-color: #6b000d; box-shadow: 0 0 6px rgba(220,53,69,0.4);" data-toggle="modal" data-target="#signModal">
+                    <i class="fa fa-key"></i> Sign Module
+                </button>
+            </div>
+        <?php endif; ?>
     </div>
-    
-<?php if ($show_resign_button): ?>
-    <div style="padding-right: 10px; margin-top: 5px;">
-        <button type="button" class="btn btn-danger" style="margin: 0; font-weight: bold; background-color: #db001a; border-color: #6b000d; box-shadow: 0 0 6px rgba(220,53,69,0.4);" data-toggle="modal" data-target="#signModal">
-            <i class="fa fa-key"></i> Sign Module
-        </button>
-    </div>
-<?php endif; ?>
-
-</div>
 
     <!-- TAB 1: GLOBAL SETTINGS -->
     <div id="tab_global" class="gen-tab-content <?= ($formData['active_tab'] === 'tab_global') ? 'active' : '' ?>">
@@ -1799,7 +1799,7 @@ function handleSignModuleSubmit(event) {
     <!-- TAB 2: TEMPLATE MANAGER -->
     <div id="tab_template" class="gen-tab-content <?= ($formData['active_tab'] === 'tab_template') ? 'active' : '' ?>">
         <div class="gen-load-box">
-            <form method="POST">
+            <form method="POST" enctype="multipart/form-data">
                 <input type="hidden" id="load_tpl_active_tab_field" name="active_tab" value="tab_template">
                 <label>Active / Edit Template:</label>
                 <div style="display: flex; gap: 8px; align-items: center;">
@@ -1883,57 +1883,55 @@ function handleSignModuleSubmit(event) {
             </div>
 
             <h3 class="gen-section-title">Line Keys BLF Settings</h3>
-<label>Number of Line Key Slots:</label>
-<select id="select_linekey_count" name="linekey_count" class="gen-full-width" onchange="updateLinekeyVisibility(this.value)">
-    <?php for ($l_cnt = 1; $l_cnt <= 29; $l_cnt++): ?>
-        <option value="<?= $l_cnt ?>" <?= ($l_cnt == $max_linekeys) ? 'selected' : '' ?>><?= $l_cnt ?> Line Keys</option>
-    <?php endfor; ?>
-</select>
-
-<div style="margin-top:10px;">
-<?php for ($i = 1; $i <= 29; $i++): ?>
-    <div id="linekey_row_<?= $i ?>" class="gen-key-row" style="display: <?= ($i <= $max_linekeys) ? 'flex' : 'none' ?>;">
-        <?php if ($i === 1): ?>
-            <select name="linekey_1_type" style="background-color: #e9ecef; pointer-events: none;" readonly tabindex="-1">
-                <option value="15" selected>Line (15)</option>
+            <label>Number of Line Key Slots:</label>
+            <select id="select_linekey_count" name="linekey_count" class="gen-full-width" onchange="updateLinekeyVisibility(this.value)">
+                <?php for ($l_cnt = 1; $l_cnt <= 29; $l_cnt++): ?>
+                    <option value="<?= $l_cnt ?>" <?= ($l_cnt == $max_linekeys) ? 'selected' : '' ?>><?= $l_cnt ?> Line Keys</option>
+                <?php endfor; ?>
             </select>
-            <input type="text" name="linekey_1_value" placeholder="Extension Number" value="<?= htmlspecialchars($formData["linekey_1_value"] ?? '') ?>" readonly style="background-color: #e9ecef;">
-            <input type="text" name="linekey_1_label" placeholder="Extension Name" value="<?= htmlspecialchars($formData["linekey_1_label"] ?? '') ?>" readonly style="background-color: #e9ecef;">
-            <input type="text" name="linekey_1_pickup" placeholder="Pickup (**)" value="<?= htmlspecialchars($formData["linekey_1_pickup"] ?? '') ?>" readonly style="background-color: #e9ecef;">
-	     <select name="linekey_1_line">
-		    <?php 
-		    $lk_line_1 = $formData["linekey_1_line"] ?? '1';
-		    for ($l = 1; $l <= 16; $l++): 
-		    ?>
-		        <option value="<?= $l ?>" <?= ($lk_line_1 == $l) ? 'selected' : '' ?>>Line <?= $l ?></option>
-		    <?php endfor; ?>
-	     </select>
 
-        <?php else: ?>
-            <select name="linekey_<?= $i ?>_type">
-                <?php 
-                $current_type = $formData["linekey_{$i}_type"] ?? '16';
-                foreach ($dss_key_types as $k_code => $k_label): 
-                ?>
-                    <option value="<?= $k_code ?>" <?= ($current_type == $k_code) ? 'selected' : '' ?>><?= $k_label ?></option>
-                <?php endforeach; ?>
-            </select>
-            <input type="text" name="linekey_<?= $i ?>_value" placeholder="Line Key <?= $i ?> Extension" value="<?= htmlspecialchars($formData["linekey_{$i}_value"] ?? '') ?>">
-            <input type="text" name="linekey_<?= $i ?>_label" placeholder="Label" value="<?= htmlspecialchars($formData["linekey_{$i}_label"] ?? '') ?>">
-            <input type="text" name="linekey_<?= $i ?>_pickup" placeholder="Pickup (**)" value="<?= htmlspecialchars($formData["linekey_{$i}_pickup"] ?? '**') ?>">
-            <select name="linekey_<?= $i ?>_line">
-		    <?php 
-		    $current_line = $formData["linekey_{$i}_line"] ?? '1';
-		    for ($l = 1; $l <= 16; $l++): 
-		    ?>
-		        <option value="<?= $l ?>" <?= ($current_line == $l) ? 'selected' : '' ?>>Line <?= $l ?></option>
-		    <?php endfor; ?>
-	     </select>
-
-        <?php endif; ?>
-    </div>
-<?php endfor; ?>
-</div>
+            <div style="margin-top:10px;">
+            <?php for ($i = 1; $i <= 29; $i++): ?>
+                <div id="linekey_row_<?= $i ?>" class="gen-key-row" style="display: <?= ($i <= $max_linekeys) ? 'flex' : 'none' ?>;">
+                    <?php if ($i === 1): ?>
+                        <select name="linekey_1_type" style="background-color: #e9ecef; pointer-events: none;" readonly tabindex="-1">
+                            <option value="15" selected>Line (15)</option>
+                        </select>
+                        <input type="text" name="linekey_1_value" placeholder="Extension Number" value="<?= htmlspecialchars($formData["linekey_1_value"] ?? '') ?>" readonly style="background-color: #e9ecef;">
+                        <input type="text" name="linekey_1_label" placeholder="Extension Name" value="<?= htmlspecialchars($formData["linekey_1_label"] ?? '') ?>" readonly style="background-color: #e9ecef;">
+                        <input type="text" name="linekey_1_pickup" placeholder="Pickup (**)" value="<?= htmlspecialchars($formData["linekey_1_pickup"] ?? '') ?>" readonly style="background-color: #e9ecef;">
+                        <select name="linekey_1_line">
+                            <?php 
+                            $lk_line_1 = $formData["linekey_1_line"] ?? '1';
+                            for ($l = 1; $l <= 16; $l++): 
+                            ?>
+                                <option value="<?= $l ?>" <?= ($lk_line_1 == $l) ? 'selected' : '' ?>>Line <?= $l ?></option>
+                            <?php endfor; ?>
+                        </select>
+                    <?php else: ?>
+                        <select name="linekey_<?= $i ?>_type">
+                            <?php 
+                            $current_type = $formData["linekey_{$i}_type"] ?? '16';
+                            foreach ($dss_key_types as $k_code => $k_label): 
+                            ?>
+                                <option value="<?= $k_code ?>" <?= ($current_type == $k_code) ? 'selected' : '' ?>><?= $k_label ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <input type="text" name="linekey_<?= $i ?>_value" placeholder="Line Key <?= $i ?> Extension" value="<?= htmlspecialchars($formData["linekey_{$i}_value"] ?? '') ?>">
+                        <input type="text" name="linekey_<?= $i ?>_label" placeholder="Label" value="<?= htmlspecialchars($formData["linekey_{$i}_label"] ?? '') ?>">
+                        <input type="text" name="linekey_<?= $i ?>_pickup" placeholder="Pickup (**)" value="<?= htmlspecialchars($formData["linekey_{$i}_pickup"] ?? '**') ?>">
+                        <select name="linekey_<?= $i ?>_line">
+                            <?php 
+                            $current_line = $formData["linekey_{$i}_line"] ?? '1';
+                            for ($l = 1; $l <= 16; $l++): 
+                            ?>
+                                <option value="<?= $l ?>" <?= ($current_line == $l) ? 'selected' : '' ?>>Line <?= $l ?></option>
+                            <?php endfor; ?>
+                        </select>
+                    <?php endif; ?>
+                </div>
+            <?php endfor; ?>
+            </div>
 
             <h3 class="gen-section-title">Memory Keys BLF Settings (Physical/Expansion)</h3>
             <label>Number of Memory Key Slots:</label>
@@ -2125,16 +2123,16 @@ function handleSignModuleSubmit(event) {
         </form>
     </div>
 
-     <!-- TAB 3: DEVICE MANAGER -->
-<?php
-$ovpn_installed = false;
-if (class_exists('FreePBX') && \FreePBX::Modules()->checkStatus('ovpn_mgr')) {
-    $module_info = \FreePBX::Modules()->getInfo('ovpn_mgr');
-    if (!empty($module_info['ovpn_mgr']) && $module_info['ovpn_mgr']['status'] === MODULE_STATUS_ENABLED) {
-        $ovpn_installed = true;
+    <!-- TAB 3: DEVICE MANAGER -->
+    <?php
+    $ovpn_installed = false;
+    if (class_exists('FreePBX') && \FreePBX::Modules()->checkStatus('ovpn_mgr')) {
+        $module_info = \FreePBX::Modules()->getInfo('ovpn_mgr');
+        if (!empty($module_info['ovpn_mgr']) && $module_info['ovpn_mgr']['status'] === MODULE_STATUS_ENABLED) {
+            $ovpn_installed = true;
+        }
     }
-}
-?>
+    ?>
     <div id="tab_devices" class="gen-tab-content <?= ($formData['active_tab'] === 'tab_devices') ? 'active' : '' ?>">
         <form id="device_manager_form" method="POST">
             <input type="hidden" id="device_active_tab_field" name="active_tab" value="tab_devices">
@@ -2244,7 +2242,7 @@ if (class_exists('FreePBX') && \FreePBX::Modules()->checkStatus('ovpn_mgr')) {
                                     </select>
                                 </td>
 
-				<?php if ($ovpn_installed): ?>
+                                <?php if ($ovpn_installed): ?>
                                     <td style="text-align:center;">
                                         <div style="display:inline-flex; align-items:center; justify-content:center;">
                                             <label class="switch" style="margin:0;">

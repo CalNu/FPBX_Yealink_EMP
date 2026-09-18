@@ -101,19 +101,35 @@ if (!file_exists($tftp_dir)) {
 // 1.5. YEALINK "GLOBAL" (y-config) FILENAMES
 // ============================================================================
 if (!function_exists('yealinkGlobalCfgMap')) {
-    function yealinkGlobalCfgMap() {
-        return [
-            'y000000000000' => 'Legacy (T28 and other original-generation models)',
-            'y000000000028' => 'T4X Legacy - T46G',
-            'y000000000029' => 'T4X Legacy - T42G',
-            'y000000000066' => 'T4X S-Series - T46S',
-            'y000000000067' => 'T4X S-Series - T42S',
-            'y000000000095' => 'T5X Series - T53W / T53',
-            'y000000000096' => 'T5X Series - T54W',
-            'y000000000108' => 'T4X U-Series - T46U',
-            'y000000000109' => 'T4X U-Series - T48U',
-        ];
-    }
+	function yealinkGlobalCfgMap() {
+		return [
+			'y000000000000' => 'Global Legacy Base',
+			'y000000000053' => 'SIP-T19 E2 / T19P E2',
+			'y000000000052' => 'SIP-T21 E2 / T21P E2',
+			'y000000000044' => 'SIP-T23P / SIP-T23G',
+			'y000000000069' => 'SIP-T27G',
+			'y000000000046' => 'SIP-T29G',
+			'y000000000127' => 'SIP-T30P / SIP-T30',
+			'y000000000123' => 'SIP-T31P / SIP-T31G / SIP-T31',
+			'y000000000172' => 'SIP-T31W',
+			'y000000000124' => 'SIP-T33P / SIP-T33G',
+			'y000000000171' => 'SIP-T34W',
+			'y000000000076' => 'SIP-T40G',
+			'y000000000054' => 'SIP-T40P',
+			'y000000000036' => 'SIP-T41P',
+			'y000000000068' => 'SIP-T41S',
+			'y000000000116' => 'SIP-T42U',
+			'y000000000107' => 'SIP-T43U',
+			'y000000000173' => 'SIP-T44U',
+			'y000000000174' => 'SIP-T44W',
+			'y000000000035' => 'SIP-T48G',
+			'y000000000065' => 'SIP-T48S',
+			'y000000000097' => 'SIP-T57W',
+			'y000000000058' => 'SIP-T58A',
+			'y000000000150' => 'SIP-T58W',
+			'y000000000091' => 'VP59',
+		];
+	}
 }
 if (!function_exists('isYealinkGlobalCfgBasename')) {
     function isYealinkGlobalCfgBasename($basename) {
@@ -744,27 +760,29 @@ $dss_key_types = [
 ];
 
 $yealink_models = [
-    "manual" => "-- Manual / Custom --",
-    "T19P"   => "T19P / T19P E2 (1 Line Key)",
-    "T21P"   => "T21P / T21P E2 (2 Line Keys)",
-    "T23G"   => "T23G / T23P (3 Line Keys)",
-    "T27G"   => "T27G / T27P (21 Line Keys)",
-    "T28P"   => "T28P (6 Line Keys, 10 Mem Keys)",
-    "T29G"   => "T29G (27 Line Keys)",
-    "T30"    => "T30 / T30P (1 Line Key)",
-    "T31G"   => "T31G / T31P / T31 (2 Line Keys)",
-    "T33G"   => "T33G / T33P (4 Line Keys)",
-    "T40P"   => "T40P / T40G (3 Line Keys)",
-    "T41S"   => "T41S / T41P / T41U (15 Line Keys)",
-    "T42S"   => "T42S / T42G / T42U (15 Line Keys)",
-    "T43U"   => "T43U (21 Line Keys)",
-    "T46S"   => "T46S / T46U / T46G (27 Line Keys)",
-    "T48S"   => "T48S / T48U / T48G (29 Line Keys)",
-    "T53W"   => "T53W / T53 (21 Line Keys)",
-    "T54W"   => "T54W (27 Line Keys)",
-    "T57W"   => "T57W (29 Line Keys)",
-    "T58A"   => "T58A / T58V (27 Line Keys)",
-    "VP59"   => "VP59 (27 Line Keys)"
+    'manual' => 'Manual / Generic',
+    'T19P'   => 'SIP-T19P E2',
+    'T21P'   => 'SIP-T21P E2',
+    'T23G'   => 'SIP-T23G / T23P',
+    'T27G'   => 'SIP-T27G',
+    'T28P'   => 'SIP-T28P',
+    'T29G'   => 'SIP-T29G',
+    'T30'    => 'SIP-T30 / T30P',
+    'T31G'   => 'SIP-T31G / T31P / T31 / T31W',
+    'T33G'   => 'SIP-T33G / T33P',
+    'T34W'   => 'SIP-T34W',
+    'T40P'   => 'SIP-T40P / T40G',
+    'T41S'   => 'SIP-T41S / T41P',
+    'T42S'   => 'SIP-T42S / T42U',
+    'T43U'   => 'SIP-T43U',
+    'T44U'   => 'SIP-T44U / T44W',
+    'T46S'   => 'SIP-T46S / T46U',
+    'T48S'   => 'SIP-T48S / T48G',
+    'T53W'   => 'SIP-T53W',
+    'T54W'   => 'SIP-T54W',
+    'T57W'   => 'SIP-T57W',
+    'T58A'   => 'SIP-T58A / T58W',
+    'VP59'   => 'VP59',
 ];
 
 $expansion_models = [

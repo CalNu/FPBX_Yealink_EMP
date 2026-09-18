@@ -339,11 +339,13 @@ function toggleOvpnState(ext, mac, enable) {
         "T30":    { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
         "T31G":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
         "T33G":   { ringFormats: ".wav, .mp3", ringSize: "Max 2MB", maxRingtone: "10", totalLimit: 10485760, logoFormat: ".jpg, .png, .bmp", logoRes: "320 x 240", logoSize: "Max 2MB" },
-        "T40P":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
+        "T34W": { ringFormats: ".wav, .mp3", ringSize: "Max 2MB", maxRingtone: "10", totalLimit: 10485760, logoFormat: ".jpg, .png, .bmp", logoRes: "320 x 240", logoSize: "Max 2MB" },
+		"T40P":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "5", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "132 x 64", logoSize: "Max 20KB" },
         "T41S":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "10", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "192 x 64", logoSize: "Max 30KB" },
         "T42S":   { ringFormats: ".wav, .mp3", ringSize: "Max 100KB", maxRingtone: "10", totalLimit: 102400, logoFormat: "Monochrome BMP", logoRes: "192 x 64", logoSize: "Max 30KB" },
         "T43U":   { ringFormats: ".wav, .mp3", ringSize: "Max 300KB", maxRingtone: "10", totalLimit: 307200, logoFormat: "Monochrome BMP", logoRes: "370 x 160", logoSize: "Max 50KB" },
-        "T46S":   { ringFormats: ".wav, .mp3", ringSize: "Max 2MB", maxRingtone: "10", totalLimit: 20971520, logoFormat: ".jpg, .png, .bmp", logoRes: "480 x 272", logoSize: "Max 2MB" },
+        "T44U": { ringFormats: ".wav, .mp3", ringSize: "Max 300KB", maxRingtone: "10", totalLimit: 307200, logoFormat: "Monochrome BMP", logoRes: "370 x 160", logoSize: "Max 50KB" },
+		"T46S":   { ringFormats: ".wav, .mp3", ringSize: "Max 2MB", maxRingtone: "10", totalLimit: 20971520, logoFormat: ".jpg, .png, .bmp", logoRes: "480 x 272", logoSize: "Max 2MB" },
         "T48S":   { ringFormats: ".wav, .mp3", ringSize: "Max 2MB", maxRingtone: "10", totalLimit: 20971520, logoFormat: ".jpg, .png, .bmp", logoRes: "800 x 480", logoSize: "Max 2MB" },
         "T53W":   { ringFormats: ".wav, .mp3", ringSize: "Max 300KB", maxRingtone: "10", totalLimit: 307200, logoFormat: "Monochrome BMP", logoRes: "370 x 160", logoSize: "Max 50KB" },
         "T54W":   { ringFormats: ".wav, .mp3", ringSize: "Max 2MB", maxRingtone: "10", totalLimit: 20971520, logoFormat: ".jpg, .png, .bmp", logoRes: "480 x 272", logoSize: "Max 2MB" },
@@ -979,10 +981,12 @@ function toggleOvpnState(ext, mac, enable) {
             "T30":    { keys: 1,  lines: 1 },
             "T31G":   { keys: 2,  lines: 2 },
             "T33G":   { keys: 4,  lines: 4 },
-            "T40P":   { keys: 3,  lines: 3 },
+            "T34W":   { keys: 4, lines: 4 },
+			"T40P":   { keys: 3,  lines: 3 },
             "T41S":   { keys: 15, lines: 6 },
             "T42S":   { keys: 15, lines: 6 },
             "T43U":   { keys: 21, lines: 12 },
+			"T44U":   { keys: 21, lines: 12 },
             "T46S":   { keys: 27, lines: 16 },
             "T48S":   { keys: 29, lines: 16 },
             "T53W":   { keys: 21, lines: 12 },
@@ -1769,17 +1773,13 @@ function toggleOvpnState(ext, mac, enable) {
             <label>Add raw global Yealink configuration flags (applied to every y-config file, one per line):</label>
             <textarea name="custom_inputs_global" class="gen-textarea"><?= htmlspecialchars($formData['custom_inputs_global']) ?></textarea>
 
-            <?php if (!empty($generated_common_cfg)): ?>
-                <h3 class="gen-section-title">Generated Common Output (written to all y-configs below)</h3>
-                <textarea readonly class="gen-textarea" style="height:300px;"><?= htmlspecialchars($generated_common_cfg) ?></textarea>
-                <p style="font-size:12px; color:#666; margin-top:6px;">
-                    This exact content is written to every phone-generation's y-config file so all supported models pick up Global Settings, not just the legacy one:
-                    <?php foreach (yealinkGlobalCfgMap() as $g_basename => $g_label): ?>
-                        <code style="margin-right:6px;" title="<?= htmlspecialchars($g_label) ?>"><?= htmlspecialchars($g_basename) ?>.cfg</code>
-                    <?php endforeach; ?>
-                </p>
-            <?php endif; ?>
-
+			<?php if (!empty($generated_common_cfg)): ?>
+				<h3 class="gen-section-title">Generated Common Output</h3>
+				<textarea readonly class="gen-textarea" style="height:300px;"><?= htmlspecialchars($generated_common_cfg) ?></textarea>
+				<p style="font-size:12px; color:#666; margin-top:6px;">
+					This content is synchronized for all Yealink models listed in the template presets. All y-config files saved in <code>/tftpboot/</code>.
+				</p>
+			<?php endif; ?>
             <br>
             <div style="display: flex; gap: 10px; margin-top: 10px;">
                 <button type="submit" name="save_global" class="gen-btn" style="background: #28a745; margin-top:0;">Save Global Settings to /tftpboot/</button>

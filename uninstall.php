@@ -49,16 +49,13 @@ removeSipAndPjsipNotifyCustom();
 // ============================================================================
 // 2. REMOVE MODULE SYMLINKS
 // ============================================================================
-$module_name = 'yealink_epm';
+$module_name = 'yealink_epm'; 
 $module_root = $amp_conf['AMPWEBROOT'] . '/admin/modules/' . $module_name;
-$phone_settings_dir = $amp_conf['AMPWEBROOT'] . '/PhoneSettings';
 
-// Plain symlinks it's always safe to remove outright: removing a symlink
-// never touches whatever it points to, it just deletes the pointer itself.
 $symlinks_to_remove = [
-    $amp_conf['AMPWEBROOT'] . '/tftpboot',   // alias created by install
-    $amp_conf['AMPWEBROOT'] . '/tftp',       // alias created by install
-    '/tftpboot/' . $module_name,             // /tftpboot/yealink_epm -> module dir
+    "/var/www/html/tftpboot",
+    "/var/www/html/tftp",
+    "/tftpboot/PhoneSettings",
     $module_root . '/tftpboot',
     $module_root . '/PhoneSettings',
     $module_root . '/ovpn_mgr'
@@ -71,30 +68,11 @@ foreach ($symlinks_to_remove as $link) {
 }
 out("Cleaned up module symlinks.");
 
-// PhoneSettings gets special handling: it's the live TFTP root for every
-// phone's config, so we must never delete real content out from under it.
-if (is_link($phone_settings_dir)) {
-    // Safe: this is just the pointer this module created; the actual files
-    // it points to (in /tftpboot) are left completely untouched.
-    @unlink($phone_settings_dir);
-    out("Removed PhoneSettings symlink (contents preserved in /tftpboot).");
-} elseif (is_dir($phone_settings_dir)) {
-    // A real directory here (e.g. left over from a broken older install).
-    // Only remove it if it's completely empty - otherwise leave it alone
-    // so we never destroy phone configs, logos, ringtones, or vpn keys.
-    $contents = array_diff(scandir($phone_settings_dir), ['.', '..']);
-    if (empty($contents)) {
-        @rmdir($phone_settings_dir);
-        out("Removed empty PhoneSettings directory.");
-    } else {
-        out("PhoneSettings exists as a real directory containing files - leaving it in place (not removed) to avoid data loss.");
-    }
-}
-
 // ============================================================================
 // 3. REMOVE CUSTOM HTACCESS OVERRIDES
 // ============================================================================
 $htaccess_files = [
+    "/var/www/html/PhoneSettings/.htaccess",
     "/tftpboot/.htaccess"
 ];
 

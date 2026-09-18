@@ -9,16 +9,36 @@ out("Starting Yealink Endpoint Manager (yealink_epm) Installation...");
 // ============================================================================
 // 0. Module Assets & Dynamic Symlink Mapping
 // ============================================================================
-$module_name = 'yealink_epm'; 
+$module_name = 'yealink_epm';
 $module_root = $amp_conf['AMPWEBROOT'] . '/admin/modules/' . $module_name;
+$phone_settings_dir = $amp_conf['AMPWEBROOT'] . '/PhoneSettings';
 
 if (!function_exists('deploy_module_symlink')) {
-    function deploy_module_symlink($source, $target) {
-        if (file_exists($target) || is_link($target)) {
-            if (is_dir($target) && !is_link($target)) {
+    /**
+     * Create a symlink at $target pointing to $source.
+     *
+     * If $force is true and a REAL directory already occupies $target, it is
+     * recursively removed first. This is only used for PhoneSettings, which
+     * must always be a symlink to /tftpboot for this module to function -
+     * a prior failed/partial install can otherwise leave a real (empty or
+     * populated-by-mkdir) directory sitting in its place forever.
+     */
+    function deploy_module_symlink($source, $target, $force = false) {
+        if (is_dir($target) && !is_link($target)) {
+            if (!$force) {
                 out("Warning: A physical folder already exists at " . $target . ". Skipping link generation.");
                 return false;
             }
+            out("Replacing physical folder at " . $target . " with a symlink to " . $source . "...");
+            $it = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($target, RecursiveDirectoryIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::CHILD_FIRST
+            );
+            foreach ($it as $file) {
+                $file->isDir() ? @rmdir($file->getPathname()) : @unlink($file->getPathname());
+            }
+            @rmdir($target);
+        } elseif (file_exists($target) || is_link($target)) {
             @unlink($target);
         }
 
@@ -27,13 +47,21 @@ if (!function_exists('deploy_module_symlink')) {
             @chgrp($target, 'asterisk');
             return true;
         }
+
+        out("ERROR: Failed to create symlink " . $target . " -> " . $source . " (check filesystem permissions for the web server user).");
         return false;
     }
 }
 
-// Map 'tftpboot' to system /tftpboot, 'PhoneSettings' directly to web root, and 'ovpn_mgr' to adjacent module
+// PhoneSettings must always resolve to /tftpboot. Force-replace it even if a
+// previous run left a real directory behind - this is the fix for the old
+// behavior where a failed symlink() left PhoneSettings missing, and the
+// directory-setup step below then mkdir -p'd it into existence as a real
+// folder, permanently blocking the symlink on every later install.
+$phone_settings_ok = deploy_module_symlink('/tftpboot', $phone_settings_dir, true);
+
 deploy_module_symlink('/tftpboot', $module_root . '/tftpboot');
-deploy_module_symlink($amp_conf['AMPWEBROOT'] . '/PhoneSettings', $module_root . '/PhoneSettings');
+deploy_module_symlink($phone_settings_dir, $module_root . '/PhoneSettings');
 if (file_exists($amp_conf['AMPWEBROOT'] . '/admin/modules/ovpn_mgr')) {
     deploy_module_symlink($amp_conf['AMPWEBROOT'] . '/admin/modules/ovpn_mgr', $module_root . '/ovpn_mgr');
 }
@@ -41,32 +69,57 @@ if (file_exists($amp_conf['AMPWEBROOT'] . '/admin/modules/ovpn_mgr')) {
 // Map /tftpboot/yealink_epm -> /var/www/html/admin/modules/yealink_epm
 deploy_module_symlink($module_root, '/tftpboot/' . $module_name);
 
+// Convenience aliases some Yealink firmwares/tools expect at these paths.
+// (Not forced - if something real already lives here, leave it alone and warn.)
+deploy_module_symlink('/tftpboot', $amp_conf['AMPWEBROOT'] . '/tftpboot');
+deploy_module_symlink('/tftpboot', $amp_conf['AMPWEBROOT'] . '/tftp');
+
 
 // ============================================================================
 // 1. Directory Setup & Permissions
 // ============================================================================
 $tftp_dir = "/tftpboot/";
 $template_dir = "/tftpboot/templates/";
-$logo_dir = "/var/www/html/PhoneSettings/logo/";
-$ringtone_dir = "/var/www/html/PhoneSettings/ringtones/";
-$vpnkeys_dir = "/var/www/html/PhoneSettings/vpnkeys/";
-
-foreach ([$logo_dir, $ringtone_dir, $template_dir, $vpnkeys_dir] as $dir) {
-    if (!file_exists($dir)) {
-        if (!@mkdir($dir, 0775, true)) {
-            out("Failed to create directory: {$dir}");
-        } else {
-            out("Created directory: {$dir}");
-        }
-    }
-    @chown($dir, 'asterisk');
-    @chgrp($dir, 'asterisk');
-}
 
 if (!file_exists($tftp_dir)) {
     @mkdir($tftp_dir, 0775, true);
     @chown($tftp_dir, 'asterisk');
     @chgrp($tftp_dir, 'asterisk');
+}
+
+if (!file_exists($template_dir)) {
+    if (!@mkdir($template_dir, 0775, true)) {
+        out("Failed to create directory: {$template_dir}");
+    } else {
+        out("Created directory: {$template_dir}");
+    }
+}
+@chown($template_dir, 'asterisk');
+@chgrp($template_dir, 'asterisk');
+
+// logo/ringtones/vpnkeys live *under* PhoneSettings. Only create them once
+// we've confirmed PhoneSettings is genuinely the symlink to /tftpboot - if it
+// isn't, do NOT mkdir here. A recursive mkdir() on a missing PhoneSettings
+// would otherwise silently manufacture a real PhoneSettings folder, which is
+// exactly the bug that broke this before.
+if ($phone_settings_ok && is_link($phone_settings_dir)) {
+    $logo_dir     = $phone_settings_dir . '/logo/';
+    $ringtone_dir = $phone_settings_dir . '/ringtones/';
+    $vpnkeys_dir  = $phone_settings_dir . '/vpnkeys/';
+
+    foreach ([$logo_dir, $ringtone_dir, $vpnkeys_dir] as $dir) {
+        if (!file_exists($dir)) {
+            if (!@mkdir($dir, 0775, true)) {
+                out("Failed to create directory: {$dir}");
+            } else {
+                out("Created directory: {$dir}");
+            }
+        }
+        @chown($dir, 'asterisk');
+        @chgrp($dir, 'asterisk');
+    }
+} else {
+    out("ERROR: PhoneSettings is not a symlink to /tftpboot - skipping logo/ringtone/vpnkeys directory creation. Re-run the install after resolving the symlink error above.");
 }
 
 // ============================================================================
@@ -89,25 +142,7 @@ try {
 }
 
 // ============================================================================
-// 3. Ensure Web & Port 83 Symlinks Exist
-// ============================================================================
-$web_symlinks = [
-    "/var/www/html/tftpboot"   => $tftp_dir,
-    "/var/www/html/tftp"       => $tftp_dir,
-    "/tftpboot/PhoneSettings" => "/var/www/html/PhoneSettings",
-    "/var/www/html/PhoneSettings/yealink_epm"  => $module_root,
-    "/tftpboot" =>  $module_root
-];
-
-foreach ($web_symlinks as $web_symlink => $target_dir) {
-    if (!file_exists($web_symlink)) {
-        @symlink($target_dir, $web_symlink);
-        @chown($web_symlink, 'asterisk');
-    }
-}
-
-// ============================================================================
-// 4. System Dependency Check (FFmpeg & SoX)
+// 3. System Dependency Check (FFmpeg & SoX)
 // ============================================================================
 $missing_deps = [];
 
@@ -128,7 +163,7 @@ if (!empty($missing_deps) && function_exists('out')) {
 }
 
 // ============================================================================
-// 5. Isolated Directory Overrides (Prevents 403 Forbidden)
+// 4. Isolated Directory Overrides (Prevents 403 Forbidden)
 // ============================================================================
 // Directory listing is enabled for provisioning/admin convenience on the LAN,
 // but access is restricted to private (RFC1918) address space plus loopback so
@@ -161,21 +196,17 @@ IndexIgnore openvpn ovpn_mgr vpnkeys yealink_epm
 
 EOT;
 
-$target_htaccess_files = [
-    "/var/www/html/PhoneSettings/.htaccess",
-    "/tftpboot/.htaccess"
-];
-
-foreach ($target_htaccess_files as $htaccess_path) {
-    if (!file_exists($htaccess_path) || file_get_contents($htaccess_path) !== $htaccess_content) {
-        @file_put_contents($htaccess_path, $htaccess_content);
-        @chown($htaccess_path, 'asterisk');
-        @chmod($htaccess_path, 0644);
-    }
+// PhoneSettings is a symlink to /tftpboot, so writing to both paths would hit
+// the exact same physical file twice - just write it once at the real path.
+$htaccess_path = "/tftpboot/.htaccess";
+if (!file_exists($htaccess_path) || file_get_contents($htaccess_path) !== $htaccess_content) {
+    @file_put_contents($htaccess_path, $htaccess_content);
+    @chown($htaccess_path, 'asterisk');
+    @chmod($htaccess_path, 0644);
 }
 
 // ============================================================================
-// 6. Add Yealink Reboot / Check-Sync Stanzas to Asterisk Custom Configs
+// 5. Add Yealink Reboot / Check-Sync Stanzas to Asterisk Custom Configs
 // ============================================================================
 $notify_stanzas = <<<EOT
 
@@ -228,7 +259,7 @@ if ($needs_asterisk_reload) {
 }
 
 // ============================================================================
-// 7. INITIALIZE DEFAULT GLOBAL CONFIG (y000000000000.cfg)
+// 6. INITIALIZE DEFAULT GLOBAL CONFIG (y000000000000.cfg)
 // ============================================================================
 // $global_cfg_file = '/tftpboot/y000000000000.cfg';
 // if (!file_exists($global_cfg_file)) {
@@ -248,8 +279,8 @@ if ($needs_asterisk_reload) {
 // }
 
 // ============================================================================
-// 8. AUTO-SIGN MODULE (generates module.sig so the "unsigned/tampered" notice
-//    never appears in the first place; no root/sudo involved — this just
+// 7. AUTO-SIGN MODULE (generates module.sig so the "unsigned/tampered" notice
+//    never appears in the first place; no root/sudo involved - this just
 //    hashes the files that are already in place and writes a local signature
 //    file the web user already has permission to write)
 // ============================================================================

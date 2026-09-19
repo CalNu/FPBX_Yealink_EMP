@@ -69,10 +69,16 @@ if (file_exists($amp_conf['AMPWEBROOT'] . '/admin/modules/ovpn_mgr')) {
 // Map /tftpboot/yealink_epm -> /var/www/html/admin/modules/yealink_epm
 deploy_module_symlink($module_root, '/tftpboot/' . $module_name);
 
+
 // Convenience aliases some Yealink firmwares/tools expect at these paths.
 // (Not forced - if something real already lives here, leave it alone and warn.)
 deploy_module_symlink('/tftpboot', $amp_conf['AMPWEBROOT'] . '/tftpboot');
 deploy_module_symlink('/tftpboot', $amp_conf['AMPWEBROOT'] . '/tftp');
+
+// Add link to /PhoneSettings/ in /tftpboot/ 
+deploy_module_symlink($phone_settings_dir, '/tftpboot/'. '/PhoneSettings');
+
+
 
 
 // ============================================================================

@@ -7,83 +7,13 @@ global $amp_conf;
 out("Starting Yealink Endpoint Manager (yealink_epm) Installation...");
 
 // ============================================================================
-// 0. Module Assets & Dynamic Symlink Mapping
+// 0. Directory Setup & Permissions
 // ============================================================================
+// This runs BEFORE the symlinks (section 1) because four of the six links live
+// *inside* /tftpboot or PhoneSettings and need those folders to exist first.
 $module_name = 'yealink_epm';
 $module_root = $amp_conf['AMPWEBROOT'] . '/admin/modules/' . $module_name;
 $phone_settings_dir = $amp_conf['AMPWEBROOT'] . '/PhoneSettings';
-
-if (!function_exists('deploy_module_symlink')) {
-    /**
-     * Create a symlink at $target pointing to $source.
-     *
-     * If $force is true and a REAL directory already occupies $target, it is
-     * recursively removed first. This is only used for PhoneSettings, which
-     * must always be a symlink to /tftpboot for this module to function -
-     * a prior failed/partial install can otherwise leave a real (empty or
-     * populated-by-mkdir) directory sitting in its place forever.
-     */
-    function deploy_module_symlink($source, $target, $force = false) {
-        if (is_dir($target) && !is_link($target)) {
-            if (!$force) {
-                out("Warning: A physical folder already exists at " . $target . ". Skipping link generation.");
-                return false;
-            }
-            out("Replacing physical folder at " . $target . " with a symlink to " . $source . "...");
-            $it = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($target, RecursiveDirectoryIterator::SKIP_DOTS),
-                RecursiveIteratorIterator::CHILD_FIRST
-            );
-            foreach ($it as $file) {
-                $file->isDir() ? @rmdir($file->getPathname()) : @unlink($file->getPathname());
-            }
-            @rmdir($target);
-        } elseif (file_exists($target) || is_link($target)) {
-            @unlink($target);
-        }
-
-        if (@symlink($source, $target)) {
-            @chown($target, 'asterisk');
-            @chgrp($target, 'asterisk');
-            return true;
-        }
-
-        out("ERROR: Failed to create symlink " . $target . " -> " . $source . " (check filesystem permissions for the web server user).");
-        return false;
-    }
-}
-
-// PhoneSettings must always resolve to /tftpboot. Force-replace it even if a
-// previous run left a real directory behind - this is the fix for the old
-// behavior where a failed symlink() left PhoneSettings missing, and the
-// directory-setup step below then mkdir -p'd it into existence as a real
-// folder, permanently blocking the symlink on every later install.
-$phone_settings_ok = deploy_module_symlink('/tftpboot', $phone_settings_dir, true);
-
-deploy_module_symlink('/tftpboot', $module_root . '/tftpboot');
-deploy_module_symlink($phone_settings_dir, $module_root . '/PhoneSettings');
-if (file_exists($amp_conf['AMPWEBROOT'] . '/admin/modules/ovpn_mgr')) {
-    deploy_module_symlink($amp_conf['AMPWEBROOT'] . '/admin/modules/ovpn_mgr', $module_root . '/ovpn_mgr');
-}
-
-// Map /tftpboot/yealink_epm -> /var/www/html/admin/modules/yealink_epm
-deploy_module_symlink($module_root, '/tftpboot/' . $module_name);
-
-
-// Convenience aliases some Yealink firmwares/tools expect at these paths.
-// (Not forced - if something real already lives here, leave it alone and warn.)
-deploy_module_symlink('/tftpboot', $amp_conf['AMPWEBROOT'] . '/tftpboot');
-deploy_module_symlink('/tftpboot', $amp_conf['AMPWEBROOT'] . '/tftp');
-
-// Add link to /PhoneSettings/ in /tftpboot/ 
-deploy_module_symlink($phone_settings_dir, '/tftpboot/'. '/PhoneSettings');
-
-
-
-
-// ============================================================================
-// 1. Directory Setup & Permissions
-// ============================================================================
 $tftp_dir = "/tftpboot/";
 $template_dir = "/tftpboot/templates/";
 
@@ -103,17 +33,80 @@ if (!file_exists($template_dir)) {
 @chown($template_dir, 'asterisk');
 @chgrp($template_dir, 'asterisk');
 
-// logo/ringtones/vpnkeys live *under* PhoneSettings. Only create them once
-// we've confirmed PhoneSettings is genuinely the symlink to /tftpboot - if it
-// isn't, do NOT mkdir here. A recursive mkdir() on a missing PhoneSettings
-// would otherwise silently manufacture a real PhoneSettings folder, which is
-// exactly the bug that broke this before.
-if ($phone_settings_ok && is_link($phone_settings_dir)) {
-    $logo_dir     = $phone_settings_dir . '/logo/';
-    $ringtone_dir = $phone_settings_dir . '/ringtones/';
-    $vpnkeys_dir  = $phone_settings_dir . '/vpnkeys/';
+// PhoneSettings must be a REAL directory: it holds the logos, ringtones and VPN
+// keys. v1.0.4 wrongly turned it into a symlink to /tftpboot. If we find that
+// leftover, remove the symlink (unlink() only removes the pointer, never the
+// files it points at) and remember where it pointed, so any logo/ringtones/
+// vpnkeys folders that 1.0.4 created inside /tftpboot can be moved back below.
+$legacy_source = null;
+if (is_link($phone_settings_dir)) {
+    $resolved = realpath($phone_settings_dir);
+    if ($resolved !== false && is_dir($resolved)) {
+        $legacy_source = $resolved;
+    }
+    @unlink($phone_settings_dir);
+    out("Removed legacy PhoneSettings symlink at " . $phone_settings_dir . " (replacing it with a real folder).");
+}
 
-    foreach ([$logo_dir, $ringtone_dir, $vpnkeys_dir] as $dir) {
+if (!file_exists($phone_settings_dir)) {
+    if (!@mkdir($phone_settings_dir, 0775, true)) {
+        out("Failed to create directory: {$phone_settings_dir}");
+    } else {
+        out("Created directory: {$phone_settings_dir}");
+    }
+}
+clearstatcache();   // PHP caches stat() results; we just unlinked/created paths above
+$phone_settings_ok = is_dir($phone_settings_dir) && !is_link($phone_settings_dir);
+
+if ($phone_settings_ok) {
+    @chown($phone_settings_dir, 'asterisk');
+    @chgrp($phone_settings_dir, 'asterisk');
+
+    $asset_subdirs = ['logo', 'ringtones', 'vpnkeys'];
+
+    // Recover assets left in the old symlink's target (normally /tftpboot).
+    // Never overwrites anything that already exists at the destination.
+    if ($legacy_source !== null) {
+        foreach ($asset_subdirs as $sub) {
+            $from = rtrim($legacy_source, '/') . '/' . $sub;
+            $to   = $phone_settings_dir . '/' . $sub;
+
+            if (!is_dir($from) || is_link($from)) {
+                continue;
+            }
+            if (file_exists($to) || is_link($to)) {
+                out("Warning: {$to} already exists; leaving {$from} where it is. Merge them manually.");
+                continue;
+            }
+
+            $moved = @rename($from, $to);
+            if (!$moved) {
+                // rename() cannot move a directory across filesystems; mv can.
+                $mv_out = [];
+                $mv_ret = 1;
+                @exec('mv ' . escapeshellarg($from) . ' ' . escapeshellarg($to) . ' 2>&1', $mv_out, $mv_ret);
+                $moved = ($mv_ret === 0);
+            }
+            if ($moved) {
+                out("Moved existing {$sub}/ from {$legacy_source} into {$phone_settings_dir}");
+            } else {
+                out("Warning: could not move {$from} to {$to}; please move it manually.");
+            }
+        }
+    } else {
+        // No legacy symlink was found, so nothing is moved automatically (we
+        // won't guess at what belongs to us). But if v1.0.4 left assets in
+        // /tftpboot, say so rather than silently orphaning them.
+        foreach ($asset_subdirs as $sub) {
+            $stranded = '/tftpboot/' . $sub;
+            if (is_dir($stranded) && !is_link($stranded)) {
+                out("Note: found /tftpboot/{$sub}/ - if it holds your {$sub} from v1.0.4, move it with: mv /tftpboot/{$sub}/* {$phone_settings_dir}/{$sub}/");
+            }
+        }
+    }
+
+    foreach ($asset_subdirs as $sub) {
+        $dir = $phone_settings_dir . '/' . $sub . '/';
         if (!file_exists($dir)) {
             if (!@mkdir($dir, 0775, true)) {
                 out("Failed to create directory: {$dir}");
@@ -125,8 +118,73 @@ if ($phone_settings_ok && is_link($phone_settings_dir)) {
         @chgrp($dir, 'asterisk');
     }
 } else {
-    out("ERROR: PhoneSettings is not a symlink to /tftpboot - skipping logo/ringtone/vpnkeys directory creation. Re-run the install after resolving the symlink error above.");
+    out("ERROR: {$phone_settings_dir} could not be set up as a real folder - skipping logo/ringtones/vpnkeys creation and PhoneSettings symlinks. Resolve the error above and re-run the install.");
 }
+
+// ============================================================================
+// 1. Symlink Mapping
+// ============================================================================
+if (!function_exists('deploy_module_symlink')) {
+    /**
+     * Create a symlink at $target pointing to $source.
+     * Never deletes a real folder: if one already occupies $target, it is left
+     * alone with a warning. Only an existing file/symlink at $target is replaced.
+     */
+    function deploy_module_symlink($source, $target) {
+        // Already correct - nothing to do.
+        if (is_link($target) && readlink($target) === $source) {
+            return true;
+        }
+
+        if (is_dir($target) && !is_link($target)) {
+            out("Warning: A physical folder already exists at " . $target . ". Skipping link generation.");
+            return false;
+        }
+
+        if (file_exists($target) || is_link($target)) {
+            @unlink($target);
+        }
+
+        if (@symlink($source, $target)) {
+            @chown($target, 'asterisk');
+            @chgrp($target, 'asterisk');
+            return true;
+        }
+
+        out("ERROR: Failed to create symlink " . $target . " -> " . $source . " (check filesystem permissions for the web server user).");
+        return false;
+    }
+}
+
+$tftp_root = '/tftpboot';
+
+if ($phone_settings_ok) {
+    // Inside /var/www/html/PhoneSettings
+    deploy_module_symlink($tftp_root,   $phone_settings_dir . '/tftpboot');       // PhoneSettings/tftpboot     -> /tftpboot
+    deploy_module_symlink($module_root, $phone_settings_dir . '/' . $module_name); // PhoneSettings/yealink_epm  -> module dir
+
+    // Inside /tftpboot
+    deploy_module_symlink($phone_settings_dir, $tftp_root . '/PhoneSettings');     // /tftpboot/PhoneSettings    -> /var/www/html/PhoneSettings
+
+    // Inside the module dir
+    deploy_module_symlink($phone_settings_dir, $module_root . '/PhoneSettings');   // yealink_epm/PhoneSettings  -> /var/www/html/PhoneSettings
+}
+
+// Inside /tftpboot
+deploy_module_symlink($module_root, $tftp_root . '/' . $module_name);              // /tftpboot/yealink_epm      -> module dir
+
+// Inside the module dir
+deploy_module_symlink($tftp_root, $module_root . '/tftpboot');                     // yealink_epm/tftpboot       -> /tftpboot
+
+if (file_exists($amp_conf['AMPWEBROOT'] . '/admin/modules/ovpn_mgr')) {
+    deploy_module_symlink($amp_conf['AMPWEBROOT'] . '/admin/modules/ovpn_mgr', $module_root . '/ovpn_mgr');
+}
+
+// Convenience aliases some Yealink firmwares/tools expect at these paths.
+// (If something real already lives here, it is left alone with a warning.)
+deploy_module_symlink($tftp_root, $amp_conf['AMPWEBROOT'] . '/tftpboot');
+deploy_module_symlink($tftp_root, $amp_conf['AMPWEBROOT'] . '/tftp');
+
 
 // ============================================================================
 // 2. Database Table Schema Creation
@@ -202,13 +260,19 @@ IndexIgnore openvpn ovpn_mgr vpnkeys yealink_epm
 
 EOT;
 
-// PhoneSettings is a symlink to /tftpboot, so writing to both paths would hit
-// the exact same physical file twice - just write it once at the real path.
-$htaccess_path = "/tftpboot/.htaccess";
-if (!file_exists($htaccess_path) || file_get_contents($htaccess_path) !== $htaccess_content) {
-    @file_put_contents($htaccess_path, $htaccess_content);
-    @chown($htaccess_path, 'asterisk');
-    @chmod($htaccess_path, 0644);
+// PhoneSettings and /tftpboot are two separate real folders, so each gets its
+// own copy.
+$target_htaccess_files = ["/tftpboot/.htaccess"];
+if ($phone_settings_ok) {
+    $target_htaccess_files[] = $phone_settings_dir . "/.htaccess";
+}
+
+foreach ($target_htaccess_files as $htaccess_path) {
+    if (!file_exists($htaccess_path) || file_get_contents($htaccess_path) !== $htaccess_content) {
+        @file_put_contents($htaccess_path, $htaccess_content);
+        @chown($htaccess_path, 'asterisk');
+        @chmod($htaccess_path, 0644);
+    }
 }
 
 // ============================================================================

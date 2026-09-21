@@ -14,7 +14,8 @@
 
 1.0.3c Update:
 • Added local signature and ability to self sign module to get rid of the unsigned module nag.
-• Security hardened some folders in case server is internet facing while allowing /tftpboot/ and /PhoneSettings/ to be browsable from within the intranet.
+• Security hardened some folders in case server is internet facing while allowing /tftpboot/ and /PhoneSettings/ 
+  to be browsable from within the intranet.
 • Fixed some interopeabiliy between Freepbx 16 and 17
 
 1.0.10 Updates:

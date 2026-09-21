@@ -288,12 +288,19 @@ function toggleOvpnState(ext, mac, enable) {
     formData.append('mac', mac);
     formData.append('enable', enable ? '1' : '0');
 
+    // If the server never answers, don't leave the switch greyed-out (red "not allowed"
+    // cursor) forever: give up after 60s and hand control back to the user.
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 60000) : null;
+
     fetch('?display=yealink_epm&action=toggle_ovpn_state', {
         method: 'POST',
-        body: formData
+        body: formData,
+        signal: ctrl ? ctrl.signal : undefined
     })
     .then(res => res.json())
     .then(data => {
+        if (timer) clearTimeout(timer);
         toggleElem.disabled = false;
         if (data.status !== 'success') {
             alert(data.message || 'Error updating VPN state.');
@@ -311,10 +318,16 @@ function toggleOvpnState(ext, mac, enable) {
             }
         }
     })
-    .catch(() => {
+    .catch(err => {
+        if (timer) clearTimeout(timer);
         toggleElem.disabled = false;
         toggleElem.checked = !enable;
-        alert('Communication error with FreePBX backend.');
+        console.error('toggleOvpnState failed:', err);
+        if (err && err.name === 'AbortError') {
+            alert('The server did not answer within 60 seconds, so the switch was re-enabled. The change may still be running - reload the page to see the current state.');
+        } else {
+            alert('Communication error with FreePBX backend.');
+        }
     });
 }
 </script>
@@ -736,7 +749,8 @@ function toggleOvpnState(ext, mac, enable) {
             
             if (['ringtone', 'logo', 'template'].includes(fileType)) {
                 document.getElementById('delete_active_tab').value = 'tab_template';
-                targetForm.action = window.location.pathname + '?display=yealink_epm#ringtone_section';
+                epmStore(EPM_SCROLL_KEY, 'ringtone_section');
+                targetForm.action = window.location.pathname + '?display=yealink_epm';
             }
             
             targetForm.submit();
@@ -830,7 +844,40 @@ function toggleOvpnState(ext, mac, enable) {
         calculateTotalRingtonePayloadSize();
     }
 
+    // ---- Tab / scroll memory -------------------------------------------------
+    // Kept in sessionStorage (per browser tab, never shown in the address bar) instead of
+    // #anchors in the URL. A stale "#tab_devices" in the URL used to override the tab you were
+    // actually working in, sending every reload back to Device Manager.
+    var EPM_TAB_KEY    = 'yealink_epm_active_tab';
+    var EPM_SCROLL_KEY = 'yealink_epm_scroll_to';
+
+    function epmStore(key, value) {
+        try {
+            if (value === null) { sessionStorage.removeItem(key); } else { sessionStorage.setItem(key, value); }
+        } catch (e) { /* storage blocked (private mode etc.) - tabs still work, just not remembered */ }
+    }
+    function epmRead(key) {
+        try { return sessionStorage.getItem(key); } catch (e) { return null; }
+    }
+
+    // Which tab to show on page load. Priority:
+    //   1. the tab the server reports after a form POST (authoritative)
+    //   2. a legacy "#tab_xxx" link, used once and then removed from the address bar
+    //   3. the tab last used in this browser tab
+    //   4. Global Settings
+    function epmResolveInitialTab(serverTab, hash, stored) {
+        var valid = ['tab_global', 'tab_template', 'tab_devices'];
+        var fromHash = String(hash || '').replace(/^#/, '');
+        if (fromHash === 'ringtone_section') { fromHash = 'tab_template'; }
+        var candidates = [serverTab, fromHash, stored];
+        for (var i = 0; i < candidates.length; i++) {
+            if (valid.indexOf(candidates[i]) !== -1) { return candidates[i]; }
+        }
+        return 'tab_global';
+    }
+
     function switchTab(tabId) {
+        epmStore(EPM_TAB_KEY, tabId);
         var contents = document.querySelectorAll('.gen-tab-content');
         var buttons = document.querySelectorAll('.gen-tab-btn');
 
@@ -1083,20 +1130,29 @@ function toggleOvpnState(ext, mac, enable) {
 
     function closeScanModal() {
         document.getElementById('scanModal').style.display = 'none';
-        window.location.href = window.location.pathname + '?display=yealink_epm&_r=' + Date.now() + '#tab_devices';
+        epmStore(EPM_TAB_KEY, 'tab_devices');
+        window.location.href = window.location.pathname + '?display=yealink_epm&_r=' + Date.now();
     }
 
     function openManualAddModal() {
-        document.getElementById('manual_mac').value = '';
+        document.getElementById('manual_mac').value = '001565';
+        validateManualMacPrefix();
         document.getElementById('manual_ext').value = '';
         document.getElementById('manual_tpl').value = '';
         document.getElementById('manualAddModal').style.display = 'block';
         enforceUniqueExtensionSelections();
     }
 
+    function validateManualMacPrefix() {
+        var mac = document.getElementById('manual_mac').value.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
+        var warning = document.getElementById('manual_mac_warning');
+        warning.style.display = (mac.length > 0 && !mac.startsWith('0015') && !mac.startsWith('805e')) ? 'block' : 'none';
+    }
+
     function closeManualAddModal() {
         document.getElementById('manualAddModal').style.display = 'none';
-        window.location.href = window.location.pathname + '?display=yealink_epm&_r=' + Date.now() + '#tab_devices';
+        epmStore(EPM_TAB_KEY, 'tab_devices');
+        window.location.href = window.location.pathname + '?display=yealink_epm&_r=' + Date.now();
     }
 
     function submitManualAddDevice() {
@@ -1284,17 +1340,29 @@ function toggleOvpnState(ext, mac, enable) {
 
         checkUncheckedRingtonesState();
 
-        if (window.location.hash === '#tab_devices' || '<?= $formData['active_tab'] ?>' === 'tab_devices') {
-            switchTab('tab_devices');
-        } else if (window.location.hash === '#tab_template' || '<?= $formData['active_tab'] ?>' === 'tab_template' || window.location.hash === '#ringtone_section') {
-            switchTab('tab_template');
-            if (window.location.hash === '#ringtone_section') {
-                var elem = document.getElementById('ringtone_section');
-                if (elem) { elem.scrollIntoView({ behavior: 'smooth' }); }
-            }
-        } else {
-            switchTab('tab_global');
+        // Only trust the server's tab when this page is the result of a form POST that named one.
+        var epmServerTab = <?= json_encode((($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (isset($_POST['active_tab']) || ($formData['active_tab'] ?? 'tab_global') !== 'tab_global')) ? ($formData['active_tab'] ?? null) : null) ?>;
+        var epmHash = window.location.hash;
+
+        switchTab(epmResolveInitialTab(epmServerTab, epmHash, epmRead(EPM_TAB_KEY)));
+
+        // One-shot scroll target (replaces the old #ringtone_section anchor)
+        var epmScrollTo = epmRead(EPM_SCROLL_KEY);
+        if (epmHash === '#ringtone_section') { epmScrollTo = 'ringtone_section'; }
+        if (epmScrollTo) {
+            epmStore(EPM_SCROLL_KEY, null);
+            var epmScrollElem = document.getElementById(epmScrollTo);
+            if (epmScrollElem) { epmScrollElem.scrollIntoView({ behavior: 'smooth' }); }
         }
+
+        // Tidy the address bar: drop any #anchor and the one-off ?_r= cache-buster.
+        try {
+            var epmUrl = new URL(window.location.href);
+            if (epmUrl.hash !== '' || epmUrl.searchParams.has('_r')) {
+                epmUrl.searchParams.delete('_r');
+                window.history.replaceState(null, '', epmUrl.pathname + epmUrl.search);
+            }
+        } catch (e) {}
 
         var modelElem = document.getElementById('select_phone_model');
         if (modelElem) {
@@ -1452,7 +1520,8 @@ function toggleOvpnState(ext, mac, enable) {
         <h3>Manually Add Phone Device</h3>
         
         <label>MAC Address:</label>
-        <input type="text" id="manual_mac" class="gen-full-width" placeholder="e.g. 001565123456" maxlength="17">
+        <input type="text" id="manual_mac" class="gen-full-width" placeholder="e.g. 001565123456" maxlength="17" oninput="validateManualMacPrefix()">
+        <div id="manual_mac_warning" style="display:none; color:#dc3545; font-weight:bold; margin-top:5px;">This doesn't look like a Yealink MAC. Please verify MAC.</div>
 
         <label style="margin-top:10px;">Assign Extension:</label>
         <select id="manual_ext" class="gen-full-width">
@@ -1959,7 +2028,7 @@ function toggleOvpnState(ext, mac, enable) {
                     <div>
                         <strong>&#9888; Unreferenced / Deleted Ringtone(s) Detected in Phone Configs:</strong> One or more device <code>[mac].cfg</code> files assigned to this template reference ringtones that have been deleted or unchecked. Click below to issue a flush directive and sync all affected phones.
                     </div>
-                    <button type="submit" name="flush_template_ringtones" class="gen-btn-danger" style="margin:0; white-space:nowrap; padding:8px 14px; font-weight:bold;" onclick="this.form.action='?display=yealink_epm#ringtone_section';">
+                    <button type="submit" name="flush_template_ringtones" class="gen-btn-danger" style="margin:0; white-space:nowrap; padding:8px 14px; font-weight:bold;" onclick="epmStore(EPM_SCROLL_KEY, 'ringtone_section'); this.form.action='?display=yealink_epm';">
                         Flush Ringtones From Phones
                     </button>
                 </div>
@@ -2245,7 +2314,7 @@ function toggleOvpnState(ext, mac, enable) {
                                 <?php if ($ovpn_installed): ?>
                                     <td style="text-align:center;">
                                         <div style="display:inline-flex; align-items:center; justify-content:center;">
-                                            <label class="switch" style="margin:0;">
+                                            <label class="switch" style="margin:0;" title="<?= empty($clean_ext) ? 'VPN unavailable: assign an extension to this device first' : 'Turn OpenVPN on or off for this phone' ?>">
                                                 <input type="checkbox" 
                                                        id="vpn_toggle_<?= htmlspecialchars($dev['mac']) ?>" 
                                                        <?= $vpn_enabled ? 'checked' : '' ?> 

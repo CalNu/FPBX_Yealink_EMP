@@ -7,8 +7,11 @@ if (php_sapi_name() !== 'cli' && !defined('FREEPBX_IS_AUTH')) {
     die('No direct script access allowed'); 
 }
 
+// Keep PHP notices out of this module's HTML/JSON output. Do NOT call error_reporting(E_ALL) here:
+// it stays in effect for the rest of the request, and FreePBX's own config.php runs AFTER this page
+// (e.g. it reads $_SERVER['HTTP_REFERER'] unguarded). With E_ALL on, FreePBX's Whoops handler turns that
+// harmless notice into a fatal "Undefined index: HTTP_REFERER" whenever the browser sends no Referer.
 ini_set('display_errors', 0);
-error_reporting(E_ALL);
 
 // ============================================================================
 // 0. MOD-SIGN: Direct Native Execution & Instant Reload
@@ -915,6 +918,7 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
 
     $ovpn_host = '';
     $ovpn_port = '1194';
+    $vpn_prefix = '10.0.6.';   // overridden below from the server's "server a.b.c.0 ..." line
 
     $openvpn_conf = '/var/www/html/PhoneSettings/openvpn/legacy-vpn.conf';
     if (!file_exists($openvpn_conf)) {
@@ -928,6 +932,9 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
         }
         if (preg_match('/^port\s+(\d+)/m', $conf_content, $mPort)) {
             $ovpn_port = trim($mPort[1]);
+        }
+        if (preg_match('/^server\s+(\d+\.\d+\.\d+)\.\d+\s+/m', $conf_content, $mSrv)) {
+            $vpn_prefix = $mSrv[1] . '.';
         }
     }
 
@@ -955,7 +962,7 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
         try {
             $gen_script = "/var/www/html/admin/modules/ovpn_mgr/scripts/generate_client.sh";
             if (file_exists($gen_script)) {
-                exec("sudo " . escapeshellarg($gen_script) . " " . escapeshellarg($ext) . " " . escapeshellarg($mac) . " 2>&1", $output, $return_var);
+                exec("sudo -n " . escapeshellarg($gen_script) . " " . escapeshellarg($ext) . " " . escapeshellarg($mac) . " 2>&1", $output, $return_var);
                 if ($return_var === 0) {
                     $generated_path = $tar_path_vpnkeys;
                 } else {
@@ -988,7 +995,7 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
             $is_connected = false;
             if (isset($online_exts[$ext])) {
                 $contact_uri = $online_exts[$ext]['via'] ?? '';
-                if (strpos($contact_uri, '10.0.6.') !== false) {
+                if (strpos($contact_uri, $vpn_prefix) !== false) {
                     $is_connected = true;
                 }
             }
@@ -1010,9 +1017,9 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
         $easyrsa_paths = ["/etc/openvpn/easy-rsa", "/etc/openvpn/easy-rsa/3.0", "/usr/share/easy-rsa"];
         foreach ($easyrsa_paths as $er_dir) {
             if (is_dir($er_dir)) {
-                $cmd = "cd " . escapeshellarg($er_dir) . " && sudo ./easyrsa --batch revoke " . escapeshellarg($client_cn) . " 2>&1; " .
-                       "cd " . escapeshellarg($er_dir) . " && sudo ./easyrsa --batch revoke " . escapeshellarg("client_{$ext}") . " 2>&1; " .
-                       "cd " . escapeshellarg($er_dir) . " && sudo ./easyrsa gen-crl 2>&1";
+                $cmd = "cd " . escapeshellarg($er_dir) . " && sudo -n ./easyrsa --batch revoke " . escapeshellarg($client_cn) . " 2>&1; " .
+                       "cd " . escapeshellarg($er_dir) . " && sudo -n ./easyrsa --batch revoke " . escapeshellarg("client_{$ext}") . " 2>&1; " .
+                       "cd " . escapeshellarg($er_dir) . " && sudo -n ./easyrsa gen-crl 2>&1";
                 exec($cmd);
             }
         }
@@ -1023,8 +1030,8 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
             @unlink("{$legacy_pki}/private/{$ext}.key");
         }
 
-        exec("sudo /usr/bin/systemctl reload openvpn@server 2>&1");
-        exec("sudo /usr/bin/systemctl reload openvpn 2>&1");
+        exec("timeout 10 sudo -n /usr/bin/systemctl reload openvpn@server 2>&1");
+        exec("timeout 10 sudo -n /usr/bin/systemctl reload openvpn 2>&1");
 
         if (file_exists($tar_path_tftp)) { @unlink($tar_path_tftp); }
         if (file_exists($tar_path_vpnkeys)) { @unlink($tar_path_vpnkeys); }
@@ -1270,8 +1277,36 @@ if (isset($_GET['action']) && $_GET['action'] === 'add_scanned_device') {
             $cfg_body .= $tpl_content;
         }
 
-        @file_put_contents($tftp_dir . "{$scanned_mac}.cfg", $cfg_body);
-        @chown($tftp_dir . "{$scanned_mac}.cfg", 'asterisk');
+        $cfg_path = $tftp_dir . "{$scanned_mac}.cfg";
+        $cfg_written = @file_put_contents($cfg_path, $cfg_body);
+        if ($cfg_written === false) {
+            echo json_encode(['status' => 'error', 'message' => 'Could not write device config file.']);
+            exit;
+        }
+        @chown($cfg_path, 'asterisk');
+
+        // Persist administrator-added devices independently of their OUI.
+        if (!isset($pdo) || !($pdo instanceof PDO)) {
+            echo json_encode(['status' => 'error', 'message' => 'Database connection unavailable; device was not registered.']);
+            exit;
+        }
+        try {
+            $register = $pdo->prepare(
+                "INSERT INTO yealink_epm_devices (mac, ext, model, template)
+                 VALUES (:mac, :ext, :model, :template)
+                 ON DUPLICATE KEY UPDATE ext = VALUES(ext), model = VALUES(model), template = VALUES(template)"
+            );
+            $register->execute([
+                ':mac' => $scanned_mac,
+                ':ext' => $scanned_ext,
+                ':model' => 'manual',
+                ':template' => $tpl_to_write
+            ]);
+        } catch (Exception $e) {
+            error_log('Yealink EPM: unable to register manual device: ' . $e->getMessage());
+            echo json_encode(['status' => 'error', 'message' => 'Config was written, but database registration failed. Check the FreePBX database and module log.']);
+            exit;
+        }
         
         if ($should_notify && !empty($scanned_ext)) {
             $arp_table = getArpTableMap();
@@ -2177,23 +2212,68 @@ if (empty($status_output)) {
 }
 
 if (!empty($status_output)) {
-    $lines = explode("\n", $status_output);
-    foreach ($lines as $line) {
-        if (strpos($line, 'CLIENT_LIST') === 0) {
+    // Handles all three OpenVPN status formats:
+    //   v2/v3 -> "CLIENT_LIST,<cn>,<real>,<virtual>,..." rows
+    //   v1    -> "Common Name,Real Address,..." table + "ROUTING TABLE" (this is what
+    //            ovpn_mgr writes: its server.conf has "status <file> 1" and no status-version)
+    $mark_ovpn_client = function ($cn, $virt_ip) use (&$ovpn_connected_exts, &$ovpn_connected_macs, &$ovpn_connected_ips) {
+        $cn = strtolower(trim($cn));
+        if ($virt_ip !== '' && !in_array($virt_ip, $ovpn_connected_ips, true)) {
+            $ovpn_connected_ips[] = $virt_ip;
+        }
+        if ($cn === '') {
+            return;
+        }
+        // Exact CN, e.g. "1001" (ovpn_mgr certs) or "client-1001" (EPM-generated certs)
+        $ovpn_connected_exts[$cn] = true;
+        // "client-1001" / "client_1001" -> also register the bare extension "1001"
+        if (preg_match('/^client[-_]?(\d+)$/', $cn, $mExt)) {
+            $ovpn_connected_exts[$mExt[1]] = true;
+        }
+        // MAC-style CNs (legacy behaviour): keep only hex characters
+        $clean_cn = preg_replace('/[^a-f0-9]/', '', $cn);
+        if ($clean_cn !== '') {
+            $ovpn_connected_exts[$clean_cn] = true;
+            $ovpn_connected_macs[$clean_cn] = true;
+        }
+    };
+
+    $section = '';
+    foreach (explode("\n", $status_output) as $line) {
+        $line = rtrim($line, "\r");
+        if (strpos($line, 'CLIENT_LIST') === 0) {                       // v2 / v3
             $parts = explode(',', $line);
-            $cn = trim($parts[1] ?? '');
-            $virt_ip = trim($parts[3] ?? '');
+            $mark_ovpn_client($parts[1] ?? '', trim($parts[3] ?? ''));
+        } elseif (strpos($line, 'OpenVPN CLIENT LIST') === 0) {         // v1 section markers
+            $section = 'clients';
+        } elseif (strpos($line, 'ROUTING TABLE') === 0) {
+            $section = 'routes';
+        } elseif (strpos($line, 'GLOBAL STATS') === 0 || $line === 'END') {
+            $section = '';
+        } elseif ($section === 'clients' && strpos($line, 'Updated,') !== 0 && strpos($line, 'Common Name,') !== 0 && $line !== '') {
+            $parts = explode(',', $line);                                // cn,real,rx,tx,since
+            $mark_ovpn_client($parts[0] ?? '', '');
+        } elseif ($section === 'routes' && strpos($line, 'Virtual Address,') !== 0 && $line !== '') {
+            $parts = explode(',', $line);                                // virtual,cn,real,lastref
+            $mark_ovpn_client($parts[1] ?? '', trim($parts[0] ?? ''));
+        }
+    }
+}
 
-            if (!empty($virt_ip)) {
-                $ovpn_connected_ips[] = $virt_ip;
-            }
-
-            if (!empty($cn)) {
-                $clean_cn = strtolower(preg_replace('/[^a-f0-9]/i', '', $cn));
-                $ovpn_connected_exts[$clean_cn] = true;
-                $ovpn_connected_macs[$clean_cn] = true;
+// Load administrator-registered MACs. These are allowed regardless of OUI.
+$registered_manual_macs = [];
+if (isset($pdo) && $pdo instanceof PDO) {
+    try {
+        $manual_stmt = $pdo->query("SELECT mac FROM yealink_epm_devices");
+        if ($manual_stmt) {
+            while ($manual_row = $manual_stmt->fetch(PDO::FETCH_ASSOC)) {
+                if (!empty($manual_row['mac'])) {
+                    $registered_manual_macs[strtolower(trim($manual_row['mac']))] = true;
+                }
             }
         }
+    } catch (Exception $e) {
+        error_log('Yealink EPM: unable to load registered devices: ' . $e->getMessage());
     }
 }
 
@@ -2201,6 +2281,13 @@ if (is_array($existing_files)) {
     foreach ($existing_files as $file_path) {
         $b_name = basename($file_path);
         $file_name_no_ext = strtolower(pathinfo($b_name, PATHINFO_FILENAME));
+		
+        // Show known Yealink OUIs automatically, plus admin-registered MACs.
+        $is_known_yealink_oui = preg_match('/^(0015|805e)[a-f0-9]{8}$/i', $file_name_no_ext) === 1;
+        $is_registered_manual = isset($registered_manual_macs[$file_name_no_ext]);
+        if (!$is_known_yealink_oui && !$is_registered_manual) {
+            continue;
+        }
         
         if (isYealinkGlobalCfgBasename($file_name_no_ext) || strpos(strtolower($b_name), 'template') !== false) continue;
 

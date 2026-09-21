@@ -1,0 +1,8 @@
+1.0.6
+• fixed referer error in freepbx16
+• replaced #anchors with sessionStorage.
+
+1.0.7
+• Added function to hide non-yealink MAC id's (0015, 805e)
+• Added autofill manually added mac with 001565 and notification if mac entered isn't a known yealkink MAC. 
+• Added function if any device entered manually, overrides the hidden non yealink MAC rule

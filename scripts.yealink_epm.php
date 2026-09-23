@@ -7,8 +7,11 @@ if (php_sapi_name() !== 'cli' && !defined('FREEPBX_IS_AUTH')) {
     die('No direct script access allowed'); 
 }
 
+// Keep PHP notices out of this module's HTML/JSON output. Do NOT call error_reporting(E_ALL) here:
+// it stays in effect for the rest of the request, and FreePBX's own config.php runs AFTER this page
+// (e.g. it reads $_SERVER['HTTP_REFERER'] unguarded). With E_ALL on, FreePBX's Whoops handler turns that
+// harmless notice into a fatal "Undefined index: HTTP_REFERER" whenever the browser sends no Referer.
 ini_set('display_errors', 0);
-error_reporting(E_ALL);
 
 // ============================================================================
 // 0. MOD-SIGN: Direct Native Execution & Instant Reload
@@ -183,12 +186,46 @@ $detected_tz_info = $yealink_tz_mapping[$server_tz_identifier] ?? ['offset' => '
 // 3. DETECT GLOBAL HTTPS REDIRECT & DETERMINE PROVISIONING PORT / GUI ADDR
 // ============================================================================
 
+// The previous check called sysadmin_get_storage_settings() and looked for an
+// 'https_redirect' key. That function is real, but it belongs to Sysadmin's
+// storage/backup email-notification settings — it has nothing to do with
+// HTTP/HTTPS redirection or Port Management, and never returns an
+// 'https_redirect' key. So $sysadmin_redirect was always false, regardless
+// of how Port Management was actually configured, and toggling "Force" in
+// Port Management never changed anything here.
+//
+// There also isn't a single reliable "is HTTPS forced" flag we can query:
+// FreePBX's Port Management treats "HTTP Provisioning" as its own service
+// with its own port (83 by default), separate from whether the admin GUI's
+// HTTP is forced to redirect to HTTPS. What actually matters for phones is
+// simply whether something is listening on that HTTP provisioning port, so
+// we test that directly instead of trusting a config flag.
 $sysadmin_redirect = false;
-if (function_exists('sysadmin_get_storage_settings')) {
-    $settings = sysadmin_get_storage_settings();
-    if (!empty($settings['https_redirect'])) {
-        $sysadmin_redirect = true;
+$http_prov_probe = @fsockopen('127.0.0.1', 83, $errno, $errstr, 0.5);
+if ($http_prov_probe) {
+    @fclose($http_prov_probe);
+    $sysadmin_redirect = true;
+}
+
+// Re-derives host:port for the provisioning/asset target from the CURRENT
+// sysadmin_redirect state, rather than trusting a port baked into a
+// previously-saved value. Only the hostname is preserved from $host_string;
+// the port is always recomputed so toggling the global HTTPS redirect
+// setting takes effect immediately, without stale :83 (or missing :83)
+// values persisting from before the setting was changed.
+function yealink_epm_apply_redirect_port($host_string, $sysadmin_redirect) {
+    if (empty($host_string)) {
+        return $host_string;
     }
+    $bare = $host_string;
+    if (strpos($bare, '://') !== false) {
+        $parsed = parse_url($bare, PHP_URL_HOST);
+        if (!empty($parsed)) {
+            $bare = $parsed;
+        }
+    }
+    $bare = explode(':', $bare)[0];
+    return $sysadmin_redirect ? "{$bare}:83" : $bare;
 }
 
 $raw_host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_ADDR'] ?? '';
@@ -312,111 +349,6 @@ if (isset($_GET['action']) && ($_GET['action'] === 'download_ringtone' || $_GET[
 // 5. HELPER FUNCTIONS & OVPN_MGR INTEGRATION
 // ============================================================================
 
-function generateYealinkOpenVpnTarFromOvpnMgr($mac, $ext, $server_host, $server_port = '1194', &$debug_log = []) {
-    $macClean = strtolower(preg_replace('/[^a-fA-F0-9]/', '', $mac));
-    $extClean = preg_replace('/[^0-9]/', '', $ext);
-
-    if (empty($macClean) || empty($extClean)) {
-        $debug_log[] = "FAIL: Invalid MAC or Extension provided.";
-        return false;
-    }
-
-    $pkiDir = '/var/www/html/PhoneSettings/openvpn/legacy_pki';
-    $targetVpnDir = '/var/www/html/PhoneSettings/vpnkeys';
-
-    if (!is_dir("{$pkiDir}/issued")) { @mkdir("{$pkiDir}/issued", 0775, true); }
-    if (!is_dir("{$pkiDir}/private")) { @mkdir("{$pkiDir}/private", 0775, true); }
-    if (!is_dir($targetVpnDir)) { 
-        @mkdir($targetVpnDir, 0775, true); 
-        @chown($targetVpnDir, 'asterisk');
-    }
-
-    $clientCert = "{$pkiDir}/issued/{$extClean}.crt";
-    $clientKey  = "{$pkiDir}/private/{$extClean}.key";
-    $caCert     = "{$pkiDir}/ca.crt";
-    $caKey      = "{$pkiDir}/private/ca.key";
-
-    if (!file_exists($caCert) || !file_exists($caKey)) {
-        $debug_log[] = "FAIL: Missing CA cert or CA key in {$pkiDir}.";
-        return false;
-    }
-
-    if (!file_exists($clientCert) || !file_exists($clientKey)) {
-        $debug_log[] = "Certificates missing. Generating via OpenSSL for extension {$extClean}...";
-        $csr = "{$pkiDir}/{$extClean}.csr";
-        $serial = time();
-
-        $cmd1 = "openssl req -new -nodes -batch -sha1 -newkey rsa:1024 -out " . escapeshellarg($csr) . " -keyout " . escapeshellarg($clientKey) . " -subj '/CN=client-{$extClean}/' 2>&1";
-        exec($cmd1, $o1, $r1);
-        if ($r1 !== 0) {
-            $debug_log[] = "FAIL: CSR creation failed: " . implode(" | ", $o1);
-            return false;
-        }
-
-        $cmd2 = "openssl x509 -req -days 3650 -sha1 -in " . escapeshellarg($csr) . " -CA " . escapeshellarg($caCert) . " -CAkey " . escapeshellarg($caKey) . " -set_serial {$serial} -out " . escapeshellarg($clientCert) . " 2>&1";
-        exec($cmd2, $o2, $r2);
-        if ($r2 !== 0) {
-            $debug_log[] = "FAIL: Cert signing failed: " . implode(" | ", $o2);
-            return false;
-        }
-        @unlink($csr);
-        $debug_log[] = "OpenSSL certificate successfully generated.";
-    } else {
-        $debug_log[] = "Existing certificates found in {$pkiDir}.";
-    }
-
-    $stagingDir = sys_get_temp_dir() . "/vpn_build_{$macClean}";
-    if (is_dir($stagingDir)) {
-        exec("rm -rf " . escapeshellarg($stagingDir));
-    }
-    @mkdir("{$stagingDir}/keys", 0775, true);
-
-    @copy($caCert, "{$stagingDir}/ca.crt");
-    @copy($clientCert, "{$stagingDir}/client.crt");
-    @copy($clientKey, "{$stagingDir}/client.key");
-
-    @copy($caCert, "{$stagingDir}/keys/ca.crt");
-    @copy($clientCert, "{$stagingDir}/keys/client.crt");
-    @copy($clientKey, "{$stagingDir}/keys/client.key");
-
-    $vpnCnf = "client\n" .
-              "dev tun\n" .
-              "proto udp\n" .
-              "remote {$server_host} {$server_port}\n" .
-              "resolv-retry infinite\n" .
-              "nobind\n" .
-              "persist-key\n" .
-              "persist-tun\n" .
-              "reneg-sec 0\n" .
-              "ca /config/openvpn/keys/ca.crt\n" .
-              "cert /config/openvpn/keys/client.crt\n" .
-              "key /config/openvpn/keys/client.key\n" .
-              "cipher AES-128-CBC\n" .
-              "auth SHA1\n" .
-              "verb 3\n";
-
-    @file_put_contents("{$stagingDir}/vpn.cnf", $vpnCnf);
-
-    $outputTar = "{$targetVpnDir}/{$macClean}_{$extClean}_ovpn.tar";
-    if (file_exists($outputTar)) {
-        @unlink($outputTar);
-    }
-
-    $cmdTar = "cd " . escapeshellarg($stagingDir) . " && tar -cf " . escapeshellarg($outputTar) . " vpn.cnf ca.crt client.crt client.key keys/ 2>&1";
-    exec($cmdTar, $o3, $r3);
-    exec("rm -rf " . escapeshellarg($stagingDir));
-
-    if ($r3 === 0 && file_exists($outputTar)) {
-        @chmod($outputTar, 0775);
-        @chown($outputTar, 'asterisk');
-        $debug_log[] = "SUCCESS: Generated {$outputTar}";
-        return $outputTar;
-    }
-
-    $debug_log[] = "FAIL: Tar execution failed: " . implode(" | ", $o3);
-    return false;
-}
-
 function getArpTableMap() {
     $arp_map = [];
     $arp_output = [];
@@ -441,6 +373,227 @@ function getArpTableMap() {
         }
     }
     return $arp_map;
+}
+
+// ============================================================================
+// SCAN HELPERS (1.0.8): Yealink OUI list, CIDR handling, OpenVPN client list,
+// and provisioning-log MAC discovery for phones that sit behind a routed tunnel.
+// ============================================================================
+
+// Yealink's IEEE-registered MAC blocks (MA-L). 00:15:65 is the legacy block; the
+// others are the newer registrations. Add new ones here and every part of the
+// module (scanner, device list, manual-add warning) picks them up.
+if (!function_exists('getYealinkOuis')) {
+    function getYealinkOuis() {
+        return [
+            '001565',                       // legacy Yealink block
+            '805ec0', '805e0c',             // 80:5E:C0, 80:5E:0C
+            '249ad8', '44dbd2', 'c4fc22', 'ec1da9',
+            '644f56', '3497d7', 'b061a9', 'f01653',
+        ];
+    }
+}
+
+if (!function_exists('isYealinkMac')) {
+    function isYealinkMac($mac) {
+        $mac = strtolower(preg_replace('/[^a-f0-9]/i', '', (string)$mac));
+        return strlen($mac) === 12 && in_array(substr($mac, 0, 6), getYealinkOuis(), true);
+    }
+}
+
+// Accepts "192.168.1.0/24", "10.8.0.1", "10.8.0", or a hostname. Defaults to a /24.
+if (!function_exists('epmParseScanTarget')) {
+    function epmParseScanTarget($input, $fallback_ip) {
+        $input = trim((string)$input);
+        $base = '';
+        $bits = 24;
+
+        if (preg_match('#^(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\.(\d{1,3}))?(?:/(\d{1,2}))?#', $input, $m)) {
+            $base = $m[1] . '.' . $m[2] . '.' . $m[3] . '.' . ((isset($m[4]) && $m[4] !== '') ? $m[4] : '0');
+            if (isset($m[5]) && $m[5] !== '') {
+                $bits = (int)$m[5];
+            }
+        } elseif ($input !== '' && preg_match('/^[a-z0-9][a-z0-9.\-]*$/i', $input)) {
+            $resolved = gethostbyname($input);
+            if (filter_var($resolved, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                $base = $resolved;
+            }
+        }
+
+        if ($base === '' || ip2long($base) === false) {
+            $parts = explode('.', (string)$fallback_ip);
+            $base = implode('.', array_slice($parts, 0, 3)) . '.0';
+            $bits = 24;
+        }
+        if ($bits < 8 || $bits > 32) {
+            $bits = 24;
+        }
+
+        $mask  = (-1 << (32 - $bits)) & 0xFFFFFFFF;
+        $net   = ip2long($base) & $mask;
+        $bcast = $net | (~$mask & 0xFFFFFFFF);
+
+        return [
+            'net'       => $net,
+            'mask'      => $mask,
+            'bits'      => $bits,
+            'network'   => long2ip($net),
+            'broadcast' => long2ip($bcast),
+        ];
+    }
+}
+
+if (!function_exists('epmIpInTarget')) {
+    function epmIpInTarget($ip, $target) {
+        $l = ip2long($ip);
+        return $l !== false && (($l & $target['mask']) === $target['net']);
+    }
+}
+
+// Small helper so callers don't need an is_readable() check before every read.
+// Read access to the OpenVPN status log and the web server's access log (both
+// used below) is granted once, outside of any web request, by the ovpn_mgr
+// module's setup-root.sh -- see that script for how. No sudo call happens here.
+if (!function_exists('epmReadProtectedFile')) {
+    function epmReadProtectedFile($path) {
+        if (!is_readable($path)) { return ''; }
+        return (string)(@file_get_contents($path) ?: '');
+    }
+}
+
+// Returns [virtual_ip => common_name] for every client currently connected to the
+// built-in OpenVPN server (management port first, status file as fallback).
+if (!function_exists('epmGetOpenVpnClientMap')) {
+    function epmGetOpenVpnClientMap() {
+        $clients = [];
+        $status_output = '';
+
+        $fp = @fsockopen('127.0.0.1', 7505, $errno, $errstr, 1);
+        if ($fp) {
+            stream_set_timeout($fp, 2);
+            fputs($fp, "status\n");
+            while (!feof($fp)) {
+                $line = fgets($fp, 1024);
+                if ($line === false) { break; }
+                $status_output .= $line;
+                if (strpos($line, 'END') === 0) { break; }
+            }
+            fclose($fp);
+        }
+
+        if (trim($status_output) === '') {
+            foreach (['/var/log/openvpn/openvpn-status.log',
+                      '/var/www/html/PhoneSettings/openvpn/logs/openvpn-status.log',
+                      '/var/log/openvpn/status.log'] as $status_file) {
+                if (file_exists($status_file)) {
+                    $status_output = epmReadProtectedFile($status_file);
+                    if (trim($status_output) !== '') { break; }
+                }
+            }
+        }
+
+        $section = '';
+        foreach (preg_split('/\r?\n/', $status_output) as $line) {
+            if ($line === '') { continue; }
+            if (strpos($line, 'CLIENT_LIST') === 0) {                    // status v2 (csv) / v3 (tab)
+                $p = preg_split('/[,\t]/', $line);
+                $vip = trim($p[3] ?? '');
+                if (filter_var($vip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                    $clients[$vip] = preg_replace('/[^\x20-\x7E]/', '?', trim($p[1] ?? ''));
+                }
+            } elseif (strpos($line, 'OpenVPN CLIENT LIST') === 0) {      // status v1
+                $section = 'clients';
+            } elseif (strpos($line, 'ROUTING TABLE') === 0) {
+                $section = 'routes';
+            } elseif (strpos($line, 'GLOBAL STATS') === 0 || $line === 'END') {
+                $section = '';
+            } elseif ($section === 'routes' && strpos($line, 'Virtual Address,') !== 0) {
+                $p = explode(',', $line);                                // virtual,cn,real,lastref
+                $vip = trim($p[0] ?? '');
+                if (filter_var($vip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                    $clients[$vip] = preg_replace('/[^\x20-\x7E]/', '?', trim($p[1] ?? ''));
+                }
+            }
+        }
+        return $clients;
+    }
+}
+
+// A routed tunnel (OpenVPN "dev tun", or any router between the PBX and the phone)
+// never puts the phone's MAC in the PBX's ARP table. What the PBX *can* see is the
+// phone asking for its config: the request line carries "<mac>.cfg" and Yealink's
+// User-Agent. Scan the web-server access logs for that and return [ip => mac]
+// (most recent request wins) plus how many log files were readable.
+if (!function_exists('epmGetProvisioningLogMacMap')) {
+    function epmGetProvisioningLogMacMap($max_bytes = 4194304) {
+        $map = [];
+        $files = [];
+
+        foreach (['/var/log/httpd', '/var/log/apache2', '/var/log/nginx'] as $dir) {
+            $found = @glob($dir . '/*access*');
+            if (!is_array($found)) { continue; }
+            foreach ($found as $f) {
+                if (preg_match('/\.(gz|bz2|xz|zip)$/i', $f) || !is_file($f) || !is_readable($f)) { continue; }
+                $files[$f] = (int)@filemtime($f);
+            }
+        }
+        arsort($files);
+        $files = array_reverse(array_slice(array_keys($files), 0, 4));   // oldest first, newest overwrites
+
+        $read = 0;
+        foreach ($files as $f) {
+            $content = '';
+            if (is_readable($f)) {
+                $fh = @fopen($f, 'rb');
+                if ($fh) {
+                    $size = (int)@filesize($f);
+                    if ($size > $max_bytes) {
+                        fseek($fh, -$max_bytes, SEEK_END);
+                        fgets($fh);                                      // drop the partial first line
+                    }
+                    $content = stream_get_contents($fh);
+                    fclose($fh);
+                }
+            } else {
+                $content = epmReadProtectedFile($f);                     // sudo -n cat fallback
+                if (strlen($content) > $max_bytes) {
+                    $content = substr($content, -$max_bytes);
+                }
+            }
+            if ($content === '') { continue; }
+            $read++;
+
+            foreach (explode("\n", $content) as $line) {
+                if (stripos($line, '.cfg') === false && stripos($line, 'Yealink') === false) { continue; }
+                if (!preg_match('/^(?:\S+:\d+\s+)?(\d{1,3}(?:\.\d{1,3}){3})\s/', $line, $mi)) { continue; }
+
+                $mac = '';
+                if (preg_match('#/([0-9a-f]{12})\.(?:cfg|boot)#i', $line, $mm)) {
+                    $mac = $mm[1];
+                } elseif (preg_match('/Yealink[^"]*?\s([0-9a-f]{2}(?::[0-9a-f]{2}){5}|[0-9a-f]{12})\b/i', $line, $mm)) {
+                    $mac = $mm[1];
+                }
+                if ($mac === '') { continue; }
+
+                $mac = strtolower(preg_replace('/[^a-f0-9]/i', '', $mac));
+                if (isYealinkMac($mac)) {
+                    $map[$mi[1]] = $mac;
+                }
+            }
+        }
+
+        return ['map' => $map, 'files' => $read];
+    }
+}
+
+if (!function_exists('epmHostResponds')) {
+    function epmHostResponds($ip) {
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) { return false; }
+        $o = [];
+        $rc = 1;
+        exec('ping -c 1 -W 1 ' . escapeshellarg($ip) . ' > /dev/null 2>&1', $o, $rc);
+        return $rc === 0;
+    }
 }
 
 function sendSipNotify($ext_or_mac, $event_type = 'check-sync', $phone_ip = '', $admin_pass = '22222') {
@@ -591,7 +744,7 @@ function rebuildDevicesForTemplate($tpl_filename, $tftp_dir, $template_dir, $sav
     return $updated_count;
 }
 
-function generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_target, $tftp_dir) {
+function generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_target, $tftp_dir, $sysadmin_redirect) {
     $raw_server = !empty($formData['server_ip']) ? $formData['server_ip'] : $default_server_target;
     
     if (strpos($raw_server, '://') === false) {
@@ -599,12 +752,11 @@ function generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_ta
     }
     
     $parsed_host = parse_url($raw_server, PHP_URL_HOST);
-    $parsed_port = parse_url($raw_server, PHP_URL_PORT);
-    
+
     if (!empty($parsed_host)) {
-        $server_ip_target = $parsed_host . (!empty($parsed_port) ? ':' . $parsed_port : '');
+        $server_ip_target = yealink_epm_apply_redirect_port($parsed_host, $sysadmin_redirect);
     } else {
-        $server_ip_target = $default_server_target;
+        $server_ip_target = yealink_epm_apply_redirect_port($default_server_target, $sysadmin_redirect);
     }
 
     $admin_pass = $formData['admin_password'] ?? '22222';
@@ -684,7 +836,7 @@ function generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_ta
 // 6. READ GLOBAL CONFIGURATION (y-configs) & DATABASE DATA
 // ============================================================================
 
-$saved_global_server_ip = $default_server_target;
+$saved_global_server_ip = $detected_host;
 $saved_global_admin_pass = "22222";
 $saved_global_time_format = "0"; 
 $saved_global_timezone = $detected_tz_info['offset'];
@@ -709,7 +861,14 @@ if (file_exists($global_cfg_file)) {
                 }
             }
             if (preg_match('/^auto_provision\.server\.url\s*=\s*http:\/\/(.+)$/i', $g_line, $gm)) {
-                $saved_global_server_ip = trim($gm[1]);
+                // account.1.sip_server / sip_server_host are also derived from
+                // this value elsewhere, and SIP registration already has its
+                // own port field (account.1.sip_server_port) — it must never
+                // carry the HTTP provisioning port. Keep this bare (host
+                // only); the :83 shift is applied separately, only where an
+                // http:// URL is actually being built (provisioning, ringtone,
+                // logo, VPN key downloads).
+                $saved_global_server_ip = yealink_epm_apply_redirect_port(trim($gm[1]), false);
             }
             if (preg_match('/^security\.user_password\s*=\s*admin:(.+)$/i', $g_line, $gm)) {
                 $saved_global_admin_pass = trim($gm[1]);
@@ -904,6 +1063,36 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
     }
     header('Content-Type: application/json; charset=utf-8');
 
+    // The VPN toggle has no logic or PKI of its own - it only exists
+    // because ovpn_mgr owns the OpenVPN CA/daemon. Mirror the same
+    // installed+enabled check page.yealink_epm.php uses to decide
+    // whether to render the toggle at all, so a direct/replayed request
+    // can't do anything if ovpn_mgr isn't there (e.g. was uninstalled
+    // after the page was loaded).
+    global $amp_conf;
+    $amp_web_root = rtrim(($amp_conf['AMPWEBROOT'] ?? null) ?: '/var/www/html', '/');
+
+    $ovpn_mgr_available = false;
+    if (class_exists('FreePBX') && \FreePBX::Modules()->checkStatus('ovpn_mgr')) {
+        $module_info = \FreePBX::Modules()->getInfo('ovpn_mgr');
+        if (!empty($module_info['ovpn_mgr']) && $module_info['ovpn_mgr']['status'] === MODULE_STATUS_ENABLED) {
+            $ovpn_mgr_available = true;
+        }
+    }
+
+    // Path constructed directly (not via a helper from the lib file
+    // itself) since we haven't required that file yet at this point -
+    // whether it exists is exactly what we're checking.
+    $ovpn_client_ops_path = "{$amp_web_root}/admin/modules/ovpn_mgr/lib/client_ops.php";
+    if (!$ovpn_mgr_available || !file_exists($ovpn_client_ops_path)) {
+        echo json_encode([
+            'status'  => 'error',
+            'message' => 'The OpenVPN Manager (ovpn_mgr) module is not installed and enabled, so per-device VPN cannot be toggled.'
+        ]);
+        exit;
+    }
+    require_once $ovpn_client_ops_path;
+
     $mac = strtolower(preg_replace('/[^a-fA-F0-9]/', '', $_REQUEST['mac'] ?? ''));
     $ext = preg_replace('/[^0-9]/', '', $_REQUEST['ext'] ?? '');
     $enable = isset($_REQUEST['enable']) && ($_REQUEST['enable'] === '1' || $_REQUEST['enable'] === 'true');
@@ -913,28 +1102,33 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
         exit;
     }
 
-    $ovpn_host = '';
-    $ovpn_port = '1194';
+    // Every path below comes from ovpn_mgr's own resolver (AMPWEBROOT-based,
+    // wherever PhoneSettings currently resolves to) rather than being
+    // hardcoded here, so this always points at the same PKI/data ovpn_mgr's
+    // own UI and daemon use.
+    $ovpn_paths = ovpn_mgr_resolve_paths($amp_web_root);
+    $settings = getActiveServerSettings($ovpn_paths['serverConf']);
+    $ovpn_host = $settings['ip'];
+    $ovpn_port = $settings['port'];
 
-    $openvpn_conf = '/var/www/html/PhoneSettings/openvpn/legacy-vpn.conf';
-    if (!file_exists($openvpn_conf)) {
-        $openvpn_conf = '/etc/openvpn/server/server.conf';
-    }
-
-    if (file_exists($openvpn_conf)) {
-        $conf_content = (string)@file_get_contents($openvpn_conf);
-        if (preg_match('/^\#\s*client-remote-host\s+(.+)$/m', $conf_content, $mHost)) {
-            $ovpn_host = trim($mHost[1]);
+    // vpn_prefix is yealink_epm's own "is this phone's SIP registration
+    // coming in over the VPN subnet" check, derived from the same
+    // "server a.b.c.0 255.255.255.0" line ovpn_mgr writes into its conf -
+    // not something ovpn_mgr's shared settings helper exposes, so it's
+    // parsed here.
+    $vpn_prefix = '10.8.0.';
+    if (file_exists($ovpn_paths['serverConf'])) {
+        $conf_content = (string)@file_get_contents($ovpn_paths['serverConf']);
+        if (preg_match('/^server\s+(\d+\.\d+\.\d+)\.\d+\s+/m', $conf_content, $mSrv)) {
+            $vpn_prefix = $mSrv[1] . '.';
         }
-        if (preg_match('/^port\s+(\d+)/m', $conf_content, $mPort)) {
-            $ovpn_port = trim($mPort[1]);
-        }
     }
 
-    if (empty($ovpn_host)) {
-        $ovpn_host = !empty($saved_global_server_ip) ? $saved_global_server_ip : ($_SERVER['SERVER_ADDR'] ?? '192.168.0.52');
-    }
-
+    // IMPORTANT: $settings['ip'] comes from ovpn_mgr's saved
+    // "# client-remote-host ..." setting in its server configuration.
+    // Do not overwrite it with Yealink EPM's global provisioning/SIP host:
+    // that value is often the PBX's private LAN address and is not
+    // necessarily the public VPN endpoint entered in ovpn_mgr.
     if (strpos($ovpn_host, '://') !== false) {
         $ovpn_host = parse_url($ovpn_host, PHP_URL_HOST);
     }
@@ -943,42 +1137,25 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
     }
 
     $admin_pass = !empty($saved_global_admin_pass) ? $saved_global_admin_pass : '22222';
-    
-    $client_cn = "client-{$ext}";
+
     $tar_filename = "{$mac}_{$ext}_ovpn.tar";
-    $tar_path_tftp = "{$tftp_dir}openvpn_{$ext}.tar";
-    $tar_path_vpnkeys = "{$vpnkeys_dir}{$tar_filename}";
+    $tar_path_vpnkeys = "{$ovpn_paths['pkgDir']}/{$tar_filename}";
 
     if ($enable) {
-        $debug_logs = [];
-        $generated_path = false;
-        try {
-            $gen_script = "/var/www/html/admin/modules/ovpn_mgr/scripts/generate_client.sh";
-            if (file_exists($gen_script)) {
-                exec("sudo " . escapeshellarg($gen_script) . " " . escapeshellarg($ext) . " " . escapeshellarg($mac) . " 2>&1", $output, $return_var);
-                if ($return_var === 0) {
-                    $generated_path = $tar_path_vpnkeys;
-                } else {
-                    $debug_logs[] = "ovpn_mgr generate_client.sh failed (exit {$return_var}): " . implode(" ", $output) . " -- falling back to built-in generator.";
-                }
-            }
+        // buildClientPackage() is ovpn_mgr's own generator: it issues the
+        // client cert (if one doesn't already exist for this extension)
+        // against ovpn_mgr's CA and writes the tarball to $tar_path_vpnkeys
+        // itself, so there is nothing left to do here but check the result.
+        $generated_path = buildClientPackage($ovpn_paths['pkiDir'], $ovpn_paths['pkgDir'], $ovpn_paths['baseDir'], $ext, $mac, $ovpn_host, $ovpn_port);
 
-            if (!$generated_path) {
-                $generated_path = generateYealinkOpenVpnTarFromOvpnMgr($mac, $ext, $ovpn_host, $ovpn_port, $debug_logs);
-            }
-        } catch (Throwable $e) {
-            $generated_path = false;
-            $debug_logs[] = "PHP Exception: " . $e->getMessage();
-        }
-
-        if (($generated_path && file_exists($generated_path)) || file_exists($tar_path_vpnkeys)) {
+        if ($generated_path && file_exists($generated_path)) {
             $cfg_path = $tftp_dir . $mac . ".cfg";
             if (file_exists($cfg_path)) {
                 $lines = @file($cfg_path, FILE_IGNORE_NEW_LINES) ?: [];
                 $clean_lines = array_filter($lines, function($l) {
                     return !preg_match('/^(openvpn\.|network\.vpn_enable)/i', trim($l));
                 });
-                $clean_lines[] = "openvpn.url = http://{$saved_global_server_ip}/PhoneSettings/vpnkeys/{$tar_filename}";
+                $clean_lines[] = "openvpn.url = http://" . yealink_epm_apply_redirect_port($saved_global_server_ip, $sysadmin_redirect) . "/PhoneSettings/vpnkeys/{$tar_filename}";
                 $clean_lines[] = "network.vpn_enable = 1";
                 @file_put_contents($cfg_path, implode("\n", $clean_lines) . "\n");
                 @chown($cfg_path, 'asterisk');
@@ -988,7 +1165,7 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
             $is_connected = false;
             if (isset($online_exts[$ext])) {
                 $contact_uri = $online_exts[$ext]['via'] ?? '';
-                if (strpos($contact_uri, '10.0.6.') !== false) {
+                if (strpos($contact_uri, $vpn_prefix) !== false) {
                     $is_connected = true;
                 }
             }
@@ -1001,33 +1178,20 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
             exit;
         } else {
             echo json_encode([
-                'status' => 'error', 
-                'message' => "Failed to generate OpenVPN tarball.\n\nDebug Logs:\n" . implode("\n", $debug_logs)
+                'status' => 'error',
+                'message' => "ovpn_mgr failed to generate the OpenVPN package for extension {$ext}. Check the ovpn_mgr module's own log for details."
             ]);
             exit;
         }
     } else {
-        $easyrsa_paths = ["/etc/openvpn/easy-rsa", "/etc/openvpn/easy-rsa/3.0", "/usr/share/easy-rsa"];
-        foreach ($easyrsa_paths as $er_dir) {
-            if (is_dir($er_dir)) {
-                $cmd = "cd " . escapeshellarg($er_dir) . " && sudo ./easyrsa --batch revoke " . escapeshellarg($client_cn) . " 2>&1; " .
-                       "cd " . escapeshellarg($er_dir) . " && sudo ./easyrsa --batch revoke " . escapeshellarg("client_{$ext}") . " 2>&1; " .
-                       "cd " . escapeshellarg($er_dir) . " && sudo ./easyrsa gen-crl 2>&1";
-                exec($cmd);
-            }
-        }
-
-        $legacy_pki = "/var/www/html/PhoneSettings/openvpn/legacy_pki";
-        if (file_exists("{$legacy_pki}/issued/{$ext}.crt")) {
-            @unlink("{$legacy_pki}/issued/{$ext}.crt");
-            @unlink("{$legacy_pki}/private/{$ext}.key");
-        }
-
-        exec("sudo /usr/bin/systemctl reload openvpn@server 2>&1");
-        exec("sudo /usr/bin/systemctl reload openvpn 2>&1");
-
-        if (file_exists($tar_path_tftp)) { @unlink($tar_path_tftp); }
-        if (file_exists($tar_path_vpnkeys)) { @unlink($tar_path_vpnkeys); }
+        // revokeExtensionAndRestart() is ovpn_mgr's own revocation: it
+        // revokes the cert against ovpn_mgr's CA, regenerates crl.pem,
+        // deletes the cert/key and any built packages for this extension,
+        // and restarts the daemon (via the same scoped ovpnctl helper
+        // ovpn_mgr's own "Revoke" button uses) so the daemon actually
+        // starts rejecting this client - a plain file delete or service
+        // reload does not do that on its own.
+        revokeExtensionAndRestart($ovpn_paths, $ext);
 
         $cfg_path = $tftp_dir . $mac . ".cfg";
         if (file_exists($cfg_path)) {
@@ -1128,75 +1292,241 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['single_ringtone_ajax'
 if (isset($_GET['action']) && $_GET['action'] === 'scan_network') {
     if (ob_get_length()) { ob_clean(); }
     header('Content-Type: application/json');
-    
+
     $subnet_input = trim($_GET['subnet'] ?? '');
-    
+
+    // MACs that already have a config, plus extension -> MAC so we can tell which
+    // OpenVPN clients are phones we've already provisioned.
     $existing_cfg_files = glob($tftp_dir . "*.cfg");
     $existing_macs = [];
+    $ext_to_mac = [];
     if (is_array($existing_cfg_files)) {
         foreach ($existing_cfg_files as $cfg_file) {
             $mac_name = strtolower(pathinfo($cfg_file, PATHINFO_FILENAME));
-            if (!isYealinkGlobalCfgBasename($mac_name)) {
-                $existing_macs[] = $mac_name;
-            }
-        }
-    }
-
-    if (preg_match('/^(\d{1,3}\.\d{1,3}\.\d{1,3})/', $subnet_input, $m)) {
-        $prefix = $m[1];
-    } else {
-        $prefix = implode('.', array_slice(explode('.', $detected_host), 0, 3));
-    }
-
-    exec("ping -c 2 -b {$prefix}.255 > /dev/null 2>&1 &");
-    usleep(200000);
-
-    $arp_output = [];
-    if (file_exists('/proc/net/arp')) {
-        $arp_lines = @file('/proc/net/arp', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        if ($arp_lines) {
-            array_shift($arp_lines);
-            $arp_output = $arp_lines;
-        }
-    }
-    
-    if (empty($arp_output)) {
-        exec("ip neighbor show 2>/dev/null || arp -an 2>/dev/null", $arp_output);
-    }
-
-    $yealink_ouis = [
-        '001565', '0004f2', '805ec0', 'e434d7', 
-        '805e0c', '249ab8', '706979', 'b44b36', 
-        '108c70', '286b35', '001a4d', '805ec1'
-    ];
-
-    $discovered = [];
-
-    foreach ($arp_output as $line) {
-        if (preg_match('/^([\d\.]+)\s+.*\s+([0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2})/i', $line, $matches) ||
-            preg_match('/\(([\d\.]+)\)\s+at\s+([0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2}[:\-][0-9a-fA-F]{2})/i', $line, $matches)) {
-            
-            $ip = $matches[1];
-            $mac_clean = strtolower(str_replace([':', '-'], '', $matches[2]));
-
-            if (strpos($ip, $prefix . '.') !== 0 || $mac_clean === '000000000000') {
+            if (isYealinkGlobalCfgBasename($mac_name)) {
                 continue;
             }
-
-            if (strlen($mac_clean) === 12) {
-                $oui = substr($mac_clean, 0, 6);
-                if (in_array($oui, $yealink_ouis) && !in_array($mac_clean, $existing_macs)) {
-                    $discovered[] = [
-                        'ip' => $ip,
-                        'mac' => $mac_clean,
-                        'vendor' => 'Yealink'
-                    ];
+            $existing_macs[] = $mac_name;
+            if (preg_match('/^[a-f0-9]{12}$/', $mac_name)) {
+                $cfg_body = @file_get_contents($cfg_file);
+                if ($cfg_body !== false && preg_match('/^account\.1\.user_name\s*=\s*(\d+)/mi', $cfg_body, $em)) {
+                    $ext_to_mac[$em[1]] = $mac_name;
                 }
             }
         }
     }
 
-    echo json_encode(['status' => 'success', 'subnet' => "{$prefix}.0/24", 'devices' => $discovered]);
+    $target = epmParseScanTarget($subnet_input, $detected_host);
+
+    // ---- Method 1: local L2 segment (broadcast ping -> ARP table) ------------
+    exec('ping -c 2 -b ' . escapeshellarg($target['broadcast']) . ' > /dev/null 2>&1 &');
+    usleep(200000);
+
+    $discovered = [];
+    $seen_macs = [];
+
+    foreach (getArpTableMap() as $mac_clean => $ip) {
+        if ($mac_clean === '000000000000' || !epmIpInTarget($ip, $target)) {
+            continue;
+        }
+        if (isYealinkMac($mac_clean) && !in_array($mac_clean, $existing_macs, true)) {
+            $discovered[] = ['ip' => $ip, 'mac' => $mac_clean, 'vendor' => 'Yealink', 'via' => 'arp'];
+            $seen_macs[$mac_clean] = true;
+        }
+    }
+
+    // ---- Method 2: routed subnets / OpenVPN (no ARP, so use provisioning logs) --
+    $notes = [];
+    $vpn_clients = epmGetOpenVpnClientMap();
+    $vpn_in_scope = [];
+    foreach ($vpn_clients as $vip => $vcn) {
+        if (epmIpInTarget($vip, $target)) {
+            $vpn_in_scope[$vip] = $vcn;
+        }
+    }
+
+    $log_result = epmGetProvisioningLogMacMap();
+    $log_map = $log_result['map'];
+    $ping_budget = 20;
+
+    foreach ($log_map as $ip => $mac) {
+        if (!epmIpInTarget($ip, $target) || isset($seen_macs[$mac]) || in_array($mac, $existing_macs, true)) {
+            continue;
+        }
+        $via = isset($vpn_in_scope[$ip]) ? 'openvpn' : 'routed';
+        if ($via === 'routed') {
+            // Not a live OpenVPN client, so make sure the address is actually answering.
+            if ($ping_budget-- <= 0 || !epmHostResponds($ip)) {
+                continue;
+            }
+        }
+        $discovered[] = ['ip' => $ip, 'mac' => $mac, 'vendor' => 'Yealink', 'via' => $via];
+        $seen_macs[$mac] = true;
+    }
+
+    // ---- Diagnostics for the UI -------------------------------------------------
+    $unresolved = [];
+    foreach ($vpn_in_scope as $vip => $vcn) {
+        if (isset($log_map[$vip])) {
+            continue;   // MAC known: either listed above or already configured
+        }
+        $cn_ext = '';
+        if (preg_match('/^client[-_]?(\d+)$/i', $vcn, $cm) || preg_match('/^(\d+)$/', $vcn, $cm)) {
+            $cn_ext = $cm[1];
+        }
+        if ($cn_ext !== '' && isset($ext_to_mac[$cn_ext])) {
+            continue;   // extension already has a provisioned phone
+        }
+        $unresolved[] = $vip . ' (' . $vcn . ')';
+    }
+
+    if (!empty($unresolved)) {
+        $notes[] = count($unresolved) . ' connected OpenVPN client(s) in this subnet could not be matched to a Yealink MAC: '
+                 . implode(', ', array_slice($unresolved, 0, 10)) . '.';
+        if ($log_result['files'] === 0) {
+            $notes[] = 'No readable web-server access log was found (checked /var/log/httpd, /var/log/apache2, /var/log/nginx). '
+                     . 'MACs behind a routed tunnel are learned from the phone\'s provisioning requests, so the "asterisk" user needs read access to that log.';
+        } else {
+            $notes[] = 'MACs behind a routed tunnel are learned from the phone\'s provisioning request (PhoneSettings/<mac>.cfg). '
+                     . 'Reboot the phone or run Auto Provision on it, then scan again.';
+        }
+    }
+
+    if (empty($vpn_in_scope) && !empty($vpn_clients)) {
+        $vpn_nets = [];
+        foreach (array_keys($vpn_clients) as $vip) {
+            $vpn_nets[implode('.', array_slice(explode('.', $vip), 0, 3)) . '.0/24'] = true;
+        }
+        $notes[] = 'OpenVPN clients are currently connected on ' . implode(', ', array_keys($vpn_nets))
+                 . ' - enter that subnet to scan them.';
+    }
+
+    echo json_encode([
+        'status'  => 'success',
+        'subnet'  => $target['network'] . '/' . $target['bits'],
+        'devices' => $discovered,
+        'notes'   => $notes,
+    ]);
+    exit;
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'scan_debug') {
+    if (ob_get_length()) { ob_clean(); }
+    header('Content-Type: application/json');
+
+    $info = ['ouis' => getYealinkOuis()];
+
+    $proc_user = 'unknown';
+    if (function_exists('posix_getpwuid') && function_exists('posix_geteuid')) {
+        $pw = @posix_getpwuid(posix_geteuid());
+        if ($pw && !empty($pw['name'])) { $proc_user = $pw['name']; }
+    } elseif (function_exists('get_current_user')) {
+        $proc_user = get_current_user();
+    }
+    $info['php_process_user'] = $proc_user;
+    $info['note'] = "If status/log files below show readable=false, this account ({$proc_user}) needs "
+        . "read access to them. That's granted by the ovpn_mgr module's one-time setup-root.sh (run as "
+        . "root, outside of any web request) -- re-run it if it hasn't been run since this account was "
+        . "created, or if these permissions have regressed.";
+
+    // ---- OpenVPN management port -------------------------------------------
+    $mgmt_ok = false;
+    $mgmt_err = '';
+    $fp = @fsockopen('127.0.0.1', 7505, $errno, $errstr, 1);
+    if ($fp) {
+        $mgmt_ok = true;
+        fclose($fp);
+    } else {
+        $mgmt_err = "{$errno}: {$errstr}";
+    }
+    $info['openvpn_mgmt_port_7505'] = $mgmt_ok ? 'reachable' : "not reachable ({$mgmt_err})";
+
+    // ---- OpenVPN status file candidates ------------------------------------
+    $status_candidates = [
+        '/var/log/openvpn/openvpn-status.log',
+        '/var/www/html/PhoneSettings/openvpn/logs/openvpn-status.log',
+        '/var/log/openvpn/status.log',
+    ];
+    $info['openvpn_status_files'] = [];
+    foreach ($status_candidates as $sf) {
+        $info['openvpn_status_files'][] = [
+            'path'     => $sf,
+            'exists'   => file_exists($sf),
+            'readable' => is_readable($sf),
+            'size'     => file_exists($sf) ? filesize($sf) : null,
+            'mtime'    => file_exists($sf) ? date('Y-m-d H:i:s', filemtime($sf)) : null,
+        ];
+    }
+
+    // ---- Parsed OpenVPN clients ---------------------------------------------
+    $vpn_clients = epmGetOpenVpnClientMap();
+    $info['openvpn_clients_parsed'] = $vpn_clients;
+    $info['openvpn_client_count'] = count($vpn_clients);
+
+    // ---- ARP table ------------------------------------------------------------
+    $arp = getArpTableMap();
+    $info['arp_table_entries'] = count($arp);
+    $info['arp_table_sample'] = array_slice($arp, 0, 10, true);
+
+    // ---- Access log discovery --------------------------------------------------
+    $log_dirs = ['/var/log/httpd', '/var/log/apache2', '/var/log/nginx'];
+    $info['log_dirs'] = [];
+    foreach ($log_dirs as $dir) {
+        $entry = ['dir' => $dir, 'exists' => is_dir($dir), 'readable' => is_dir($dir) && is_readable($dir), 'files' => []];
+        if ($entry['exists'] && $entry['readable']) {
+            $found = @glob($dir . '/*access*');
+            if (is_array($found)) {
+                foreach ($found as $f) {
+                    $entry['files'][] = [
+                        'name'       => basename($f),
+                        'readable'   => is_readable($f),
+                        'size'       => @filesize($f),
+                        'mtime'      => @filemtime($f) ? date('Y-m-d H:i:s', filemtime($f)) : null,
+                        'compressed' => (bool)preg_match('/\.(gz|bz2|xz|zip)$/i', $f),
+                    ];
+                }
+            }
+        }
+        $info['log_dirs'][] = $entry;
+    }
+
+    // ---- Sample lines from the newest readable, uncompressed access log ------
+    $info['log_sample'] = null;
+    $newest = null;
+    $newest_mtime = -1;
+    foreach ($info['log_dirs'] as $entry) {
+        if (!$entry['readable']) { continue; }
+        foreach ($entry['files'] as $f) {
+            if (!$f['readable'] || $f['compressed']) { continue; }
+            if ($f['mtime'] !== null && strtotime($f['mtime']) > $newest_mtime) {
+                $newest_mtime = strtotime($f['mtime']);
+                $newest = $entry['dir'] . '/' . $f['name'];
+            }
+        }
+    }
+    if ($newest !== null) {
+        $lines = [];
+        $content = epmReadProtectedFile($newest);
+        if (strlen($content) > 1048576) {
+            $content = substr($content, -1048576);
+        }
+        foreach (explode("\n", $content) as $l) {
+            if (stripos($l, '.cfg') !== false || stripos($l, 'yealink') !== false) {
+                $lines[] = $l;
+            }
+        }
+        $info['log_sample'] = [
+            'file'            => $newest,
+            'matching_lines'  => count($lines),
+            'last_5_matches'  => array_slice($lines, -5),
+        ];
+        $log_result = epmGetProvisioningLogMacMap();
+        $info['log_sample']['macs_extracted'] = $log_result['map'];
+    } else {
+        $info['log_sample'] = 'No readable, uncompressed access log found in any checked directory.';
+    }
+
+    echo json_encode($info, JSON_PRETTY_PRINT);
     exit;
 }
 
@@ -1256,7 +1586,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'add_scanned_device') {
 
             $tar_file = "/var/www/html/PhoneSettings/vpnkeys/{$scanned_mac}_{$scanned_ext}_ovpn.tar";
             if (file_exists($tar_file)) {
-                $vpn_url = "http://{$saved_global_server_ip}/PhoneSettings/vpnkeys/{$scanned_mac}_{$scanned_ext}_ovpn.tar";
+                $vpn_url = "http://" . yealink_epm_apply_redirect_port($saved_global_server_ip, $sysadmin_redirect) . "/PhoneSettings/vpnkeys/{$scanned_mac}_{$scanned_ext}_ovpn.tar";
                 $cfg_body .= "openvpn.url = {$vpn_url}\n";
                 $cfg_body .= "network.vpn_enable = 1\n\n";
             }
@@ -1270,8 +1600,36 @@ if (isset($_GET['action']) && $_GET['action'] === 'add_scanned_device') {
             $cfg_body .= $tpl_content;
         }
 
-        @file_put_contents($tftp_dir . "{$scanned_mac}.cfg", $cfg_body);
-        @chown($tftp_dir . "{$scanned_mac}.cfg", 'asterisk');
+        $cfg_path = $tftp_dir . "{$scanned_mac}.cfg";
+        $cfg_written = @file_put_contents($cfg_path, $cfg_body);
+        if ($cfg_written === false) {
+            echo json_encode(['status' => 'error', 'message' => 'Could not write device config file.']);
+            exit;
+        }
+        @chown($cfg_path, 'asterisk');
+
+        // Persist administrator-added devices independently of their OUI.
+        if (!isset($pdo) || !($pdo instanceof PDO)) {
+            echo json_encode(['status' => 'error', 'message' => 'Database connection unavailable; device was not registered.']);
+            exit;
+        }
+        try {
+            $register = $pdo->prepare(
+                "INSERT INTO yealink_epm_devices (mac, ext, model, template)
+                 VALUES (:mac, :ext, :model, :template)
+                 ON DUPLICATE KEY UPDATE ext = VALUES(ext), model = VALUES(model), template = VALUES(template)"
+            );
+            $register->execute([
+                ':mac' => $scanned_mac,
+                ':ext' => $scanned_ext,
+                ':model' => 'manual',
+                ':template' => $tpl_to_write
+            ]);
+        } catch (Exception $e) {
+            error_log('Yealink EPM: unable to register manual device: ' . $e->getMessage());
+            echo json_encode(['status' => 'error', 'message' => 'Config was written, but database registration failed. Check the FreePBX database and module log.']);
+            exit;
+        }
         
         if ($should_notify && !empty($scanned_ext)) {
             $arp_table = getArpTableMap();
@@ -1564,13 +1922,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
         if (isset($_POST["memkey_{$i}_pickup"])) $formData["memkey_{$i}_pickup"] = trim($_POST["memkey_{$i}_pickup"]);
     }
 
-    $server_ip_target = $saved_global_server_ip;
     $tpl_name = preg_replace('/[^a-zA-Z0-9_\-]/', '', $formData['template_name']);
     if (empty($tpl_name)) $tpl_name = "default_template";
     $tpl_filename = $tpl_name . ".template.cfg";
 
-    $host_only = explode(':', $server_ip_target)[0];
-    $asset_host = "http://{$host_only}:83/PhoneSettings";
+    // $saved_global_server_ip is always the bare host (no port). SIP
+    // registration uses its own port field (account.1.sip_server_port,
+    // account.1.port below) and must never carry the HTTP provisioning
+    // port — only HTTP asset URLs (logo/ringtone) shift to :83.
+    $host_only = $saved_global_server_ip;
+    $asset_host = $sysadmin_redirect
+        ? "http://{$host_only}:83/PhoneSettings"
+        : "http://{$host_only}/PhoneSettings";
 
     $logo_path_prefix = "{$asset_host}/logo/";
     $logo_url = "";
@@ -1599,8 +1962,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     $generated_template_cfg .= "# Expansion Model: {$formData['exp_model']}\n";
     $generated_template_cfg .= "# Expansion Count: {$formData['exp_count']}\n\n";
 
-    $generated_template_cfg .= "account.1.sip_server = {$server_ip_target}\n";
-    $generated_template_cfg .= "account.1.sip_server_host = {$server_ip_target}\n";
+    $generated_template_cfg .= "account.1.sip_server = {$saved_global_server_ip}\n";
+    $generated_template_cfg .= "account.1.sip_server_host = {$saved_global_server_ip}\n";
     $generated_template_cfg .= "account.1.sip_server_port = {$formData['sip_port']}\n";
     $generated_template_cfg .= "account.1.port = {$formData['sip_port']}\n";
     $generated_template_cfg .= "account.1.sip_listen_port = {$formData['sip_listen_port']}\n";
@@ -2045,7 +2408,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
 
                     $tar_file = "/var/www/html/PhoneSettings/vpnkeys/{$clean_mac}_{$new_ext}_ovpn.tar";
                     if (file_exists($tar_file)) {
-                        $vpn_url = "http://{$saved_global_server_ip}/PhoneSettings/vpnkeys/{$clean_mac}_{$new_ext}_ovpn.tar";
+                        $vpn_url = "http://" . yealink_epm_apply_redirect_port($saved_global_server_ip, $sysadmin_redirect) . "/PhoneSettings/vpnkeys/{$clean_mac}_{$new_ext}_ovpn.tar";
                         $account_block[] = "openvpn.url = {$vpn_url}";
                         $account_block[] = "network.vpn_enable = 1";
                     }
@@ -2177,23 +2540,68 @@ if (empty($status_output)) {
 }
 
 if (!empty($status_output)) {
-    $lines = explode("\n", $status_output);
-    foreach ($lines as $line) {
-        if (strpos($line, 'CLIENT_LIST') === 0) {
+    // Handles all three OpenVPN status formats:
+    //   v2/v3 -> "CLIENT_LIST,<cn>,<real>,<virtual>,..." rows
+    //   v1    -> "Common Name,Real Address,..." table + "ROUTING TABLE" (this is what
+    //            ovpn_mgr writes: its server.conf has "status <file> 1" and no status-version)
+    $mark_ovpn_client = function ($cn, $virt_ip) use (&$ovpn_connected_exts, &$ovpn_connected_macs, &$ovpn_connected_ips) {
+        $cn = strtolower(trim($cn));
+        if ($virt_ip !== '' && !in_array($virt_ip, $ovpn_connected_ips, true)) {
+            $ovpn_connected_ips[] = $virt_ip;
+        }
+        if ($cn === '') {
+            return;
+        }
+        // Exact CN, e.g. "1001" (ovpn_mgr certs) or "client-1001" (EPM-generated certs)
+        $ovpn_connected_exts[$cn] = true;
+        // "client-1001" / "client_1001" -> also register the bare extension "1001"
+        if (preg_match('/^client[-_]?(\d+)$/', $cn, $mExt)) {
+            $ovpn_connected_exts[$mExt[1]] = true;
+        }
+        // MAC-style CNs (legacy behaviour): keep only hex characters
+        $clean_cn = preg_replace('/[^a-f0-9]/', '', $cn);
+        if ($clean_cn !== '') {
+            $ovpn_connected_exts[$clean_cn] = true;
+            $ovpn_connected_macs[$clean_cn] = true;
+        }
+    };
+
+    $section = '';
+    foreach (explode("\n", $status_output) as $line) {
+        $line = rtrim($line, "\r");
+        if (strpos($line, 'CLIENT_LIST') === 0) {                       // v2 / v3
             $parts = explode(',', $line);
-            $cn = trim($parts[1] ?? '');
-            $virt_ip = trim($parts[3] ?? '');
+            $mark_ovpn_client($parts[1] ?? '', trim($parts[3] ?? ''));
+        } elseif (strpos($line, 'OpenVPN CLIENT LIST') === 0) {         // v1 section markers
+            $section = 'clients';
+        } elseif (strpos($line, 'ROUTING TABLE') === 0) {
+            $section = 'routes';
+        } elseif (strpos($line, 'GLOBAL STATS') === 0 || $line === 'END') {
+            $section = '';
+        } elseif ($section === 'clients' && strpos($line, 'Updated,') !== 0 && strpos($line, 'Common Name,') !== 0 && $line !== '') {
+            $parts = explode(',', $line);                                // cn,real,rx,tx,since
+            $mark_ovpn_client($parts[0] ?? '', '');
+        } elseif ($section === 'routes' && strpos($line, 'Virtual Address,') !== 0 && $line !== '') {
+            $parts = explode(',', $line);                                // virtual,cn,real,lastref
+            $mark_ovpn_client($parts[1] ?? '', trim($parts[0] ?? ''));
+        }
+    }
+}
 
-            if (!empty($virt_ip)) {
-                $ovpn_connected_ips[] = $virt_ip;
-            }
-
-            if (!empty($cn)) {
-                $clean_cn = strtolower(preg_replace('/[^a-f0-9]/i', '', $cn));
-                $ovpn_connected_exts[$clean_cn] = true;
-                $ovpn_connected_macs[$clean_cn] = true;
+// Load administrator-registered MACs. These are allowed regardless of OUI.
+$registered_manual_macs = [];
+if (isset($pdo) && $pdo instanceof PDO) {
+    try {
+        $manual_stmt = $pdo->query("SELECT mac FROM yealink_epm_devices");
+        if ($manual_stmt) {
+            while ($manual_row = $manual_stmt->fetch(PDO::FETCH_ASSOC)) {
+                if (!empty($manual_row['mac'])) {
+                    $registered_manual_macs[strtolower(trim($manual_row['mac']))] = true;
+                }
             }
         }
+    } catch (Exception $e) {
+        error_log('Yealink EPM: unable to load registered devices: ' . $e->getMessage());
     }
 }
 
@@ -2201,6 +2609,13 @@ if (is_array($existing_files)) {
     foreach ($existing_files as $file_path) {
         $b_name = basename($file_path);
         $file_name_no_ext = strtolower(pathinfo($b_name, PATHINFO_FILENAME));
+		
+        // Show known Yealink OUIs automatically, plus admin-registered MACs.
+        $is_known_yealink_oui = isYealinkMac($file_name_no_ext) || preg_match('/^(0015|805e)[a-f0-9]{8}$/i', $file_name_no_ext) === 1;
+        $is_registered_manual = isset($registered_manual_macs[$file_name_no_ext]);
+        if (!$is_known_yealink_oui && !$is_registered_manual) {
+            continue;
+        }
         
         if (isYealinkGlobalCfgBasename($file_name_no_ext) || strpos(strtolower($b_name), 'template') !== false) continue;
 
@@ -2326,7 +2741,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['save_global'])) {
         if (isset($_POST[$k])) $formData[$k] = trim($_POST[$k]);
     }
 
-    $generated_common_cfg = generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_target, $tftp_dir);
+    $generated_common_cfg = generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_target, $tftp_dir, $sysadmin_redirect);
     $status = "Saved Global Settings to " . count(yealinkGlobalCfgMap()) . " y-config file(s) in {$tftp_dir}";
 }
 

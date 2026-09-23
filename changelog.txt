@@ -1,0 +1,62 @@
+1.0.12
+• Fixed Yealink EPM's per-device OpenVPN toggle overriding ovpn_mgr's configured public VPN IP/hostname with EPM's global provisioning host. VPN client packages now use the host resolved from ovpn_mgr's saved client-remote-host setting, while the provisioning download URL continues to use EPM's provisioning host.
+
+1.0.11
+• Removed the sudo -n cat fallback and sudoers-line messaging added in 1.0.10. Read access to the OpenVPN status log and web server access log is now granted once, outside of any web request, by the ovpn_mgr module's setup-root.sh -- see that script.
+• Debug Scan's note field now points to setup-root.sh instead of printing a sudoers rule to paste in.
+• Debug Scanner still exist, but button hidden (code commented out).
+• Fixed ringtone and logo http port if system doesn't have http -> https redirect.
+
+1.0.10
+• Fixed: Scan Subnet modal (and the notes/debug box inside it) wasn't scrollable, so long Debug Scan output was cut off. Both now scroll independently of the page.
+• Debug Scan now reports the OS user PHP is running as, plus a ready-to-paste sudoers line, since a 'readable: false' on the OpenVPN status log or access log is almost always a file-permission issue, not a scanner bug.
+• The scanner and Debug Scan now both fall back to 'sudo -n cat' for the OpenVPN status log and access log if a normal read fails and a sudoers rule permits it (no reinstall needed once the rule is added -- next scan picks it up automatically).
+
+1.0.9
+• Added a 'Debug Scan' button next to the subnet scanner. It reports what the backend can actually see: OpenVPN management-port/status-file state, parsed VPN client list, ARP table size, which access-log directories/files are readable, and sample provisioning-request lines with the MACs extracted from them. Use this output to see exactly why a phone on an OpenVPN subnet isn't showing up in the scan.
+
+1.0.8
+• Subnet scanner: replaced the OUI list with Yealink's IEEE-registered blocks (added 249ad8, 44dbd2, c4fc22, ec1da9, 644f56, 3497d7, b061a9, f01653; removed non-Yealink/typo entries). 805e0c and 805ec0 both retained.
+• Subnet scanner: now finds phones behind OpenVPN / routed subnets by reading provisioning requests from the web-server access log (ARP cannot see MACs across a tun tunnel). Accepts CIDR input (e.g. 10.8.0.0/24).
+• Device list and manual-add warning use the same full Yealink OUI list.
+
+1.0.7
+• Added function to hide non-yealink MAC id's (0015, 805e)
+• Added autofill manually added mac with 001565 and notification if mac entered isn't a known yealkink MAC. 
+• Added function if any device entered manually, overrides the hidden non yealink MAC rule
+
+1.0.6
+• fixed referer error in freepbx16
+• replaced #anchors with sessionStorage.
+
+1.0.4 Update:
+• Large code rewrite to create the VPN tar using my OpenVPN manager.
+• Added y-configs for all the newer phone models.
+• Adjusted line keys to match the selected model number.
+
+1.0.3c Update:
+• Added local signature and ability to self sign module to get rid of the unsigned module nag.
+• Security hardened some folders in case server is internet facing while allowing /tftpboot/ and /PhoneSettings/ 
+  to be browsable from within the intranet.
+• Fixed some interopeabiliy between Freepbx 16 and 17
+
+1.0.10 Updates:
+• Added integration with my openvpn module https://github.com/CalNu/FPBX_OVPN_MGR
+• Multiple bug fixes.
+
+1.0.0.9 updates: 
+• Added upload/download template file. Save location moved to /tftpboot/templates/
+• Added ringtone conversion to convert mp3 and wav to 8khz, pcmu, mono to match yealink requirements. 
+  This requires ffmpeg installed. Most freepbx has it preinstalled. The module will install it for you 
+  if not, but this must be done at the command line "fwconsole ma install yealink_epm" or 
+  "fwconsole ma downloadinstall https://github.com/hgolbar/FPBX_Yealink_EMP/archive/refs/heads/1.0.0.9.zip"
+• Added ability to trim audio files.
+• Added download function for ringtones
+• Added flush command when deleting ringtones in use may any mac.cfg files. This pushes a mac.cfg that deletes 
+  all ringtones and reinstalls checked ones.  Once the template is saved, it rebuilds the mac.cfg to remove the 
+  delete command so it doesn't keep deleting/reinstalling the ringtone on each reboot.
+
+
+
+
+

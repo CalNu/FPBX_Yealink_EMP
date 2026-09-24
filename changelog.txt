@@ -1,3 +1,12 @@
+1.1.1
+• Created a "Dashboard" design to rearrange sections and expand/collapse them.
+• Changed color theme to match Freepbx
+
+1.1.0
+• Line keys, memory keys and the new Programmable Keys editor now open as popout windows from a compact "Keys" section on the Template tab. Confirm keeps your edits, Cancel (or Esc) puts everything back; the fields still save with the template.
+• Added programmable key support (programablekey.X.*). Each phone model shows only the keys it actually has (SoftKeys, arrows, OK, Cancel, CONF, Hold, Mute, TRAN, Redial, Message), and each key's Line/Value/Label/Extension fields enable only for the types that use them. Keys left at their factory function are not written to the template. Existing programablekey lines in a template load into the editor instead of the custom additions box.
+• Memory keys popout is paged by expansion module. Line key, memory key and programmable key rows now share aligned column headers.
+
 1.0.12
 • Fixed Yealink EPM's per-device OpenVPN toggle overriding ovpn_mgr's configured public VPN IP/hostname with EPM's global provisioning host. VPN client packages now use the host resolved from ovpn_mgr's saved client-remote-host setting, while the provisioning download URL continues to use EPM's provisioning host.
 

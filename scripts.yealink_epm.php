@@ -951,6 +951,230 @@ $expansion_models = [
     "EXP50" => "EXP50 (60 Keys per Module)"
 ];
 
+// Keys per expansion module (matches the labels above).
+$expansion_key_sizes = ['none' => 0, 'EXP20' => 20, 'EXP40' => 40, 'EXP50' => 60];
+
+// ----------------------------------------------------------------------------
+// Per-model key layout. This is the single source of truth for the page JS and
+// for template generation/parsing.
+//   linekeys : linekey.X slots on the phone itself
+//   lines    : SIP accounts the phone can register
+//   memkeys  : built-in physical memory keys (memorykey.X). Only the legacy T2x
+//              side-button phones (T28P here) have these; every other model puts
+//              all of its DSS keys under linekey.X.
+// Expansion module keys are NOT memorykey.X on any model: they are written as
+// expansion_module.<module>.key.<key>.* (see epm_build_memory_keys_block()).
+// ----------------------------------------------------------------------------
+$yealink_model_keys = [
+    'manual' => ['linekeys' => 1,  'lines' => 16, 'memkeys' => 0],
+    'T19P'   => ['linekeys' => 1,  'lines' => 1,  'memkeys' => 0],
+    'T21P'   => ['linekeys' => 2,  'lines' => 2,  'memkeys' => 0],
+    'T23G'   => ['linekeys' => 3,  'lines' => 3,  'memkeys' => 0],
+    'T27G'   => ['linekeys' => 21, 'lines' => 6,  'memkeys' => 0],
+    'T28P'   => ['linekeys' => 6,  'lines' => 6,  'memkeys' => 10],
+    'T29G'   => ['linekeys' => 27, 'lines' => 16, 'memkeys' => 0],
+    'T30'    => ['linekeys' => 1,  'lines' => 1,  'memkeys' => 0],
+    'T31G'   => ['linekeys' => 2,  'lines' => 2,  'memkeys' => 0],
+    'T33G'   => ['linekeys' => 4,  'lines' => 4,  'memkeys' => 0],
+    'T34W'   => ['linekeys' => 4,  'lines' => 4,  'memkeys' => 0],
+    'T40P'   => ['linekeys' => 3,  'lines' => 3,  'memkeys' => 0],
+    'T41S'   => ['linekeys' => 15, 'lines' => 6,  'memkeys' => 0],
+    'T42S'   => ['linekeys' => 15, 'lines' => 6,  'memkeys' => 0],
+    'T43U'   => ['linekeys' => 21, 'lines' => 12, 'memkeys' => 0],
+    'T44U'   => ['linekeys' => 21, 'lines' => 12, 'memkeys' => 0],
+    'T46S'   => ['linekeys' => 27, 'lines' => 16, 'memkeys' => 0],
+    'T48S'   => ['linekeys' => 29, 'lines' => 16, 'memkeys' => 0],
+    'T53W'   => ['linekeys' => 21, 'lines' => 12, 'memkeys' => 0],
+    'T54W'   => ['linekeys' => 27, 'lines' => 16, 'memkeys' => 0],
+    'T57W'   => ['linekeys' => 29, 'lines' => 16, 'memkeys' => 0],
+    'T58A'   => ['linekeys' => 27, 'lines' => 16, 'memkeys' => 0],
+    'VP59'   => ['linekeys' => 27, 'lines' => 16, 'memkeys' => 0],
+];
+
+// ----------------------------------------------------------------------------
+// Programmable keys (programablekey.X.*)
+// Source: Yealink admin guide, "DSS Keys > Programmable Keys". IDs are the
+// physical/soft key positions; which IDs exist depends on the phone family.
+// NOTE: everything the popout needs is passed around as arrays (no globals),
+// because FreePBX includes this file from inside a function scope.
+// ----------------------------------------------------------------------------
+$prog_key_names = [
+    1 => 'SoftKey 1', 2 => 'SoftKey 2', 3 => 'SoftKey 3', 4 => 'SoftKey 4',
+    5 => 'Up', 6 => 'Down', 7 => 'Left', 8 => 'Right', 9 => 'OK', 10 => 'Cancel',
+    11 => 'CONF', 12 => 'Hold', 13 => 'Mute', 14 => 'TRAN',
+    17 => 'Redial', 18 => 'Message'
+];
+
+// Factory function of each key (Yealink default values). 0 = N/A.
+$prog_key_defaults = [
+    1 => 28, 2 => 61, 3 => 5, 4 => 30, 5 => 28, 6 => 61, 7 => 51, 8 => 52, 9 => 33,
+    10 => 0, 11 => 0, 12 => 0, 13 => 0, 14 => 2, 17 => 0, 18 => 0
+];
+
+// Models where a key's factory function differs from the table above.
+// T30 / T19 E2 do not support Switch Account Up/Down, so Left/Right are N/A.
+$prog_key_default_override = [
+    'T19P' => [7 => 0, 8 => 0],
+    'T30'  => [7 => 0, 8 => 0]
+];
+
+$prog_key_types = [
+    0 => 'N/A', 2 => 'Forward', 5 => 'DND', 7 => 'Recall', 8 => 'SMS', 9 => 'Pickup',
+    13 => 'Speed Dial', 14 => 'Intercom', 23 => 'Group Pickup', 24 => 'Multicast Paging',
+    27 => 'XML Browser', 28 => 'History', 30 => 'Menu', 32 => 'New SMS', 33 => 'Status',
+    34 => 'Hot Desking', 40 => 'Prefix', 41 => 'Zero Touch', 43 => 'Local Directory',
+    50 => 'Phone Lock', 51 => 'Switch Account Up', 52 => 'Switch Account Down',
+    61 => 'Directory', 66 => 'Paging List'
+];
+
+// Which extra fields a key type actually uses (line, value, ext, hist).
+// Label is handled separately: only SoftKey 1-4 have an on-screen label.
+$prog_key_type_fields = [
+    2  => ['line', 'value'],
+    9  => ['line', 'value'],
+    13 => ['line', 'value'],
+    14 => ['line', 'value', 'ext'],
+    23 => ['line', 'value'],
+    24 => ['value', 'ext'],
+    27 => ['value'],
+    28 => ['hist'],
+    40 => ['value']
+];
+
+$prog_grp_t3  = [1, 2, 3, 4, 5, 6, 7, 8, 9, 13, 14, 17, 18];          // T31 / T30 / T19 E2
+$prog_grp_t2  = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 17, 18];         // T23 / T21 E2
+$prog_grp_t27 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 18]; // T27G / T29G
+$prog_grp_t4  = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 17, 18];         // T33 / T40 / T41 / T42 / T43 / T53
+$prog_grp_t5  = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 17, 18]; // T46 / T48 / T54
+$prog_grp_t57 = [1, 2, 3, 4, 12, 13, 14, 17, 18];                     // T57 / T58 / VP59
+
+$prog_key_models = [
+    'manual' => array_keys($prog_key_names),
+    'T19P' => $prog_grp_t3,  'T21P' => $prog_grp_t2,  'T23G' => $prog_grp_t2,
+    'T27G' => $prog_grp_t27, 'T28P' => [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+    'T29G' => $prog_grp_t27, 'T30'  => $prog_grp_t3,  'T31G' => $prog_grp_t3,
+    'T33G' => $prog_grp_t4,  'T34W' => $prog_grp_t4,  'T40P' => $prog_grp_t4,
+    'T41S' => $prog_grp_t4,  'T42S' => $prog_grp_t4,  'T43U' => $prog_grp_t4,
+    'T44U' => $prog_grp_t4,  'T46S' => $prog_grp_t5,  'T48S' => $prog_grp_t5,
+    'T53W' => $prog_grp_t4,  'T54W' => $prog_grp_t5,  'T57W' => $prog_grp_t57,
+    'T58A' => $prog_grp_t57, 'VP59' => $prog_grp_t57
+];
+
+$prog_meta = [
+    'names'     => $prog_key_names,
+    'defaults'  => $prog_key_defaults,
+    'overrides' => $prog_key_default_override,
+    'fields'    => $prog_key_type_fields,
+    'models'    => $prog_key_models
+];
+
+function epm_prog_key_default($model, $id, array $meta) {
+    if (isset($meta['overrides'][$model][$id])) {
+        return (int)$meta['overrides'][$model][$id];
+    }
+    return (int)($meta['defaults'][$id] ?? 0);
+}
+
+function epm_prog_clean($s) {
+    return trim(preg_replace('/[\r\n]+/', ' ', (string)$s));
+}
+
+// Maps a flat memory-key index (1..N, as shown in the Memory Keys box) to the
+// config prefix the phone expects:
+//   1..$base_mem                 -> memorykey.<i>                       (built-in keys)
+//   $base_mem+1.. (with module)  -> expansion_module.<m>.key.<k>        (m = module, k = key on it)
+// With no expansion module selected, anything past the built-in keys falls back
+// to memorykey.<i> so nothing the user typed is silently dropped.
+function epm_memkey_prefix($i, $base_mem, $exp_size) {
+    if ($i <= $base_mem || $exp_size <= 0) {
+        return ["memorykey.{$i}", false];
+    }
+    $j = $i - $base_mem;
+    $module = intdiv($j - 1, $exp_size) + 1;
+    $key = (($j - 1) % $exp_size) + 1;
+    return ["expansion_module.{$module}.key.{$key}", true];
+}
+
+function epm_build_memory_keys_block(array $formData, $count, $base_mem, $exp_size) {
+    $out = '';
+    $has = false;
+    for ($i = 1; $i <= $count; $i++) {
+        $val = trim((string)($formData["memkey_{$i}_value"] ?? ''));
+        if ($val === '') { continue; }
+        if (!$has) {
+            $out .= "################################################\n";
+            $out .= "##         Memory / Expansion Keys              ##\n";
+            $out .= "################################################\n\n";
+            $has = true;
+        }
+        $pickup = isset($formData["memkey_{$i}_pickup"]) ? $formData["memkey_{$i}_pickup"] : '**';
+        if ($pickup === '') { $pickup = '**'; }
+
+        list($prefix, $is_exp) = epm_memkey_prefix($i, $base_mem, $exp_size);
+        $out .= "{$prefix}.value = {$val}\n";
+        if ($pickup !== 'none') {
+            $out .= "{$prefix}.pickup_value = {$pickup}\n";
+        }
+        if ($is_exp) {
+            $out .= "{$prefix}.line = 1\n";
+        }
+        $out .= "{$prefix}.type = 16\n\n";
+    }
+    return $out;
+}
+
+// Builds the programablekey.* block for a template. Keys left at their factory
+// function (and with nothing filled in) are not written, so the phone keeps
+// its own defaults. Only keys that exist on the selected model are written.
+function epm_build_prog_keys_block(array $formData, array $meta) {
+    $model = $formData['phone_model'] ?? 'manual';
+    $ids = $meta['models'][$model] ?? $meta['models']['manual'];
+    $out = '';
+
+    foreach ($ids as $id) {
+        $type_raw = trim((string)($formData["progkey_{$id}_type"] ?? ''));
+        if ($type_raw === '' || !ctype_digit($type_raw)) { continue; }
+        $type = (int)$type_raw;
+        $default = epm_prog_key_default($model, $id, $meta);
+        $fields = $meta['fields'][$type] ?? [];
+
+        $line = '';
+        if (in_array('line', $fields, true)) {
+            $line = epm_prog_clean($formData["progkey_{$id}_line"] ?? '1');
+            if ($line === '' || !ctype_digit($line)) { $line = '1'; }
+        }
+        $value = in_array('value', $fields, true) ? epm_prog_clean($formData["progkey_{$id}_value"] ?? '') : '';
+        $ext   = in_array('ext', $fields, true)   ? epm_prog_clean($formData["progkey_{$id}_ext"] ?? '')   : '';
+        $hist  = in_array('hist', $fields, true)  ? epm_prog_clean($formData["progkey_{$id}_hist"] ?? '0') : '';
+        $label = ($id <= 4 && $type !== 0) ? epm_prog_clean($formData["progkey_{$id}_label"] ?? '') : '';
+
+        $has_extra = ($value !== '' || $ext !== '' || $label !== '' || ($hist !== '' && $hist !== '0') || ($line !== '' && $line !== '1'));
+        if ($type === $default && !$has_extra) { continue; }
+
+        if ($out === '') {
+            $out .= "################################################\n";
+            $out .= "##" . str_pad("         Programmable Keys", 44) . "##\n";
+            $out .= "################################################\n\n";
+        }
+        $out .= "programablekey.{$id}.type = {$type}\n";
+        if ($line !== '')  { $out .= "programablekey.{$id}.line = {$line}\n"; }
+        if ($value !== '') { $out .= "programablekey.{$id}.value = {$value}\n"; }
+        if ($ext !== '')   { $out .= "programablekey.{$id}.extension = {$ext}\n"; }
+        if ($hist !== '' && $hist !== '0') { $out .= "programablekey.{$id}.history_type = {$hist}\n"; }
+        if ($label !== '') { $out .= "programablekey.{$id}.label = {$label}\n"; }
+        $out .= "\n";
+    }
+    return $out;
+}
+
+// Per-model factory functions for every key ID (handed to the popout's JS).
+$prog_key_model_defaults = [];
+foreach (array_keys($prog_key_models) as $pm_name) {
+    foreach (array_keys($prog_key_names) as $pm_id) {
+        $prog_key_model_defaults[$pm_name][$pm_id] = epm_prog_key_default($pm_name, $pm_id, $prog_meta);
+    }
+}
+
 if (isset($db) && $db instanceof PDO) {
     $pdo = $db;
 } else {
@@ -1865,6 +2089,15 @@ for ($i = 1; $i <= 180; $i++) {
     $formData["memkey_{$i}_pickup"] = "";
 }
 
+foreach (array_keys($prog_key_names) as $pid) {
+    $formData["progkey_{$pid}_type"] = (string)$prog_key_defaults[$pid];
+    $formData["progkey_{$pid}_line"] = "1";
+    $formData["progkey_{$pid}_value"] = "";
+    $formData["progkey_{$pid}_label"] = "";
+    $formData["progkey_{$pid}_ext"] = "";
+    $formData["progkey_{$pid}_hist"] = "0";
+}
+
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     $formData['active_tab'] = 'tab_template';
 
@@ -1920,6 +2153,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     for ($i = 1; $i <= 180; $i++) {
         if (isset($_POST["memkey_{$i}_value"])) $formData["memkey_{$i}_value"] = trim($_POST["memkey_{$i}_value"]);
         if (isset($_POST["memkey_{$i}_pickup"])) $formData["memkey_{$i}_pickup"] = trim($_POST["memkey_{$i}_pickup"]);
+    }
+
+    foreach (array_keys($prog_key_names) as $pid) {
+        foreach (['type', 'line', 'value', 'label', 'ext', 'hist'] as $pf) {
+            if (isset($_POST["progkey_{$pid}_{$pf}"])) {
+                $formData["progkey_{$pid}_{$pf}"] = trim($_POST["progkey_{$pid}_{$pf}"]);
+            }
+        }
     }
 
     $tpl_name = preg_replace('/[^a-zA-Z0-9_\-]/', '', $formData['template_name']);
@@ -2006,26 +2247,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
 
     $generated_template_cfg .= buildDistinctiveRingtoneConfigBlock($formData['uploaded_ringtones']);
 
-    $has_memkeys = false;
-    for ($i = 1; $i <= $max_memkeys; $i++) {
-        $val = $formData["memkey_{$i}_value"] ?? '';
-        if (!empty($val)) {
-            if (!$has_memkeys) {
-                $generated_template_cfg .= "################################################\n";
-                $generated_template_cfg .= "##         Memory Keys                          ##\n";
-                $generated_template_cfg .= "################################################\n\n";
-                $has_memkeys = true;
-            }
-            $pickup = isset($formData["memkey_{$i}_pickup"]) ? $formData["memkey_{$i}_pickup"] : '**';
-            if ($pickup === '') { $pickup = '**'; }
-            
-            $generated_template_cfg .= "memorykey.{$i}.value = {$val}\n";
-            if ($pickup !== 'none') {
-                $generated_template_cfg .= "memorykey.{$i}.pickup_value = {$pickup}\n";
-            }
-            $generated_template_cfg .= "memorykey.{$i}.type = 16\n\n";
-        }
-    }
+    $gen_base_mem = (int)($yealink_model_keys[$formData['phone_model']]['memkeys'] ?? 0);
+    $gen_exp_size = (int)($expansion_key_sizes[$formData['exp_model']] ?? 0);
+    $generated_template_cfg .= epm_build_memory_keys_block($formData, $max_memkeys, $gen_base_mem, $gen_exp_size);
 
     $has_linekeys = false;
     for ($i = 1; $i <= $max_linekeys; $i++) {
@@ -2052,6 +2276,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
             if (!empty($lbl)) $generated_template_cfg .= "linekey.{$i}.label = {$lbl}\n\n";
         }
     }
+
+    $generated_template_cfg .= epm_build_prog_keys_block($formData, $prog_meta);
 
     $generated_template_cfg .= "phone_setting.lcd_logo.mode = {$lcd_logo_mode}\n";
     if ($is_logo_disabled) {
@@ -2113,6 +2339,14 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
 
         $highest_tpl_linekey = 0;
         $highest_tpl_memkey = 0;
+        $prog_seen = [];
+        foreach (array_keys($prog_key_names) as $pid) {
+            $formData["progkey_{$pid}_line"] = "1";
+            $formData["progkey_{$pid}_value"] = "";
+            $formData["progkey_{$pid}_label"] = "";
+            $formData["progkey_{$pid}_ext"] = "";
+            $formData["progkey_{$pid}_hist"] = "0";
+        }
         $formData['uploaded_ringtones'] = [];
 
         foreach ($tpl_lines as $t_line) {
@@ -2191,6 +2425,30 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
                 $is_parsed_tpl = true;
             }
 
+            // expansion_module.<module>.key.<key>.* -> flat memory-key index (built-in keys first, then module 1, 2, ...)
+            if (preg_match('/^expansion_module\.(\d+)\.key\.(\d+)\.(value|label|type|pickup_value|line)$/i', $k, $m)) {
+                $tpl_base_mem = (int)($yealink_model_keys[$formData['phone_model']]['memkeys'] ?? 0);
+                $tpl_exp_size = (int)($expansion_key_sizes[$formData['exp_model']] ?? 0);
+                if ($tpl_exp_size <= 0) { $tpl_exp_size = 40; }
+                $flat = $tpl_base_mem + (((int)$m[1] - 1) * $tpl_exp_size) + (int)$m[2];
+                $f_name = (strtolower($m[3]) === 'pickup_value') ? 'pickup' : strtolower($m[3]);
+                if ($f_name === 'value' || $f_name === 'pickup') {
+                    $formData["memkey_{$flat}_{$f_name}"] = $v;
+                }
+                if ($flat > $highest_tpl_memkey) $highest_tpl_memkey = $flat;
+                $is_parsed_tpl = true;
+            }
+
+            if (preg_match('/^programablekey\.(\d+)\.(type|line|value|label|extension|history_type)$/i', $k, $m) && isset($prog_key_names[(int)$m[1]])) {
+                $pk_id = (int)$m[1];
+                $pk_field = strtolower($m[2]);
+                if ($pk_field === 'extension') { $pk_field = 'ext'; }
+                elseif ($pk_field === 'history_type') { $pk_field = 'hist'; }
+                $formData["progkey_{$pk_id}_{$pk_field}"] = $v;
+                if ($pk_field === 'type') { $prog_seen[$pk_id] = true; }
+                $is_parsed_tpl = true;
+            }
+
             if (!$is_parsed_tpl) {
                 $unparsed_tpl[] = "{$k} = {$v}";
             }
@@ -2211,7 +2469,20 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
         }
 
         if ($highest_tpl_linekey > 0) $max_linekeys = $formData['linekey_count'] = $highest_tpl_linekey;
-        if ($highest_tpl_memkey > 0) $max_memkeys = $formData['memkey_count'] = $highest_tpl_memkey;
+        // Slots = built-in keys for this model + every expansion module selected, or the highest key the file uses.
+        $tpl_want_mem = max(
+            $highest_tpl_memkey,
+            (int)($yealink_model_keys[$formData['phone_model']]['memkeys'] ?? 0)
+                + ((int)($expansion_key_sizes[$formData['exp_model']] ?? 0) * (int)$formData['exp_count'])
+        );
+        if ($tpl_want_mem > 0) $max_memkeys = $formData['memkey_count'] = $tpl_want_mem;
+
+        // Keys the file does not mention fall back to this model's factory function.
+        foreach (array_keys($prog_key_names) as $pid) {
+            if (empty($prog_seen[$pid])) {
+                $formData["progkey_{$pid}_type"] = (string)epm_prog_key_default($formData['phone_model'], $pid, $prog_meta);
+            }
+        }
 
         $formData['custom_inputs'] = implode("\n", $unparsed_tpl);
         $formData['server_ip'] = $saved_global_server_ip;

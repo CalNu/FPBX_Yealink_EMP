@@ -104,6 +104,104 @@ if (!defined('FREEPBX_IS_AUTH')) {
 
     .gen-modal { display: none; position: fixed; z-index: 999; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
     .gen-modal-content { background: #fff; margin: 8% auto; padding: 20px; width: 65%; border-radius: 8px; max-height: 80vh; overflow-y: auto; }
+    /* Key boxes (line keys / memory keys / programmable keys) */
+    .gen-key-btn-reset { background: #6c757d; }
+    .gen-key-note { color: #555; font-size: 13px; margin: 0 0 6px; }
+    .gen-key-num { flex: none; width: 28px; align-self: center; text-align: right; color: #666; font-size: 12px; }
+    .gen-kh { display: flex; gap: 10px; margin-top: 12px; font-size: 12px; font-weight: bold; color: #666; }
+    .gen-kh span { flex: 1; }
+    .gen-kh .gen-key-num { flex: none; }
+    .gen-key-pages { flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .gen-key-page { padding: 5px 10px; border: 1px solid #ced4da; border-radius: 4px; background: #fff; cursor: pointer; font-size: 13px; }
+    .gen-key-page.active { background: #007bff; border-color: #007bff; color: #fff; }
+    .gen-key-empty { color: #666; margin-top: 12px; }
+    .gen-pk-name { font-size: 13px; font-weight: bold; }
+    .gen-pk-row, .gen-pk-head { display: grid; grid-template-columns: 84px 1.5fr 1fr 1.2fr 1.2fr 1fr; gap: 10px; align-items: center; }
+    .gen-lk-row, .gen-lk-head { display: grid; grid-template-columns: 28px 1.1fr 1.5fr 1.5fr 1.5fr 1fr; gap: 10px; align-items: center; }
+    .gen-mk-row, .gen-mk-head { display: grid; grid-template-columns: 28px 1.6fr 1fr; gap: 10px; align-items: center; }
+    .gen-pk-row > *, .gen-pk-head > *, .gen-lk-row > *, .gen-lk-head > *, .gen-mk-row > *, .gen-mk-head > * { min-width: 0; }
+    .gen-pk-row input, .gen-pk-row select, .gen-lk-row input, .gen-lk-row select, .gen-mk-row input { width: 100%; box-sizing: border-box; }
+    .pk-na { display: block; padding: 8px; border: 1px solid #dee2e6; border-radius: 4px; background: #e9ecef; color: #888; font-size: 13px; box-sizing: border-box; }
+    .gen-container input.gen-pk-off { background: #e9ecef; color: #888; }
+
+    /* ---- Template tab dashboard (movable boxes) ---- */
+    .epm-dash-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+    .epm-dash-hint { color: #777; font-size: 12px; }
+    .epm-dash-reset { margin: 0 !important; padding: 4px 10px !important; font-size: 12px; background: #6c757d !important; white-space: nowrap; }
+    .epm-dash { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; margin-top: 12px; }
+    .epm-box { margin-bottom: 0; }
+    .epm-box[data-span="2"] { grid-column: 1 / -1; }
+    .epm-box { border: 1px solid #ced4da; border-radius: 6px; background: #fff; min-width: 0; box-shadow: 0 1px 2px rgba(0,0,0,.05); break-inside: avoid; margin-bottom: 0; }
+    .epm-box.epm-dragging { opacity: .45; outline: 2px dashed #007bff; }
+    .epm-box-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: #f1f3f5; border-bottom: 1px solid #ced4da; border-radius: 6px 6px 0 0; min-width: 0; }
+    .epm-folded .epm-box-head { border-bottom: none; border-radius: 6px; }
+    .epm-grip { cursor: move; color: #888; padding: 2px 4px; }
+    .epm-grip:hover { color: #007bff; }
+    .epm-box-title { white-space: nowrap; }
+    .epm-box-sub { flex: 1; min-width: 0; color: #666; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .epm-box-tools { display: flex; gap: 2px; margin-left: auto; }
+    .epm-tool { background: none; border: none; color: #666; cursor: pointer; padding: 2px 6px; border-radius: 3px; }
+    .epm-tool:hover { background: #dee2e6; color: #222; }
+    .epm-folded .epm-tool[data-act="fold"] i { transform: rotate(180deg); }
+    .epm-folded .epm-box-body { display: none; }
+    .epm-box-body { padding: 10px; container-type: inline-size; }
+    .epm-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+    .epm-toolbar label { margin: 0 !important; }
+    .gen-container .epm-toolbar select { width: auto; }
+    .epm-toolbar-note { color: #666; font-size: 12px; flex: 1; min-width: 140px; }
+    .epm-toolbar .gen-key-btn-reset { padding: 4px 10px; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 12px; }
+    .epm-scroll { max-height: 440px; overflow: auto; padding-right: 4px; }
+    .epm-scroll .gen-kh { position: sticky; top: 0; z-index: 1; background: #fff; margin-top: 0; padding: 2px 0; }
+    .epm-box .gen-key-row { margin-top: 3px; }
+    .epm-box .gen-lk-row, .epm-box .gen-lk-head { gap: 6px; grid-template-columns: 24px minmax(0, 1.05fr) minmax(0, 1.25fr) minmax(0, 1.25fr) minmax(0, .9fr) minmax(0, .9fr); }
+    .epm-box .gen-mk-row, .epm-box .gen-mk-head { gap: 6px; grid-template-columns: 24px minmax(0, 1.6fr) minmax(0, 1fr); }
+    .epm-box .gen-pk-row, .epm-box .gen-pk-head { gap: 6px; grid-template-columns: 78px minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.1fr) minmax(0, 1fr); }
+    .gen-container .epm-box input[type="text"], .gen-container .epm-box select { padding: 4px 6px; height: 28px; font-size: 12px; }
+    .epm-box .pk-na { padding: 4px 6px; height: 28px; font-size: 12px; }
+    .epm-box .gen-pk-name { font-size: 12px; }
+    .epm-box .gen-kh { gap: 6px; font-size: 11px; }
+    .epm-box .ringtone-card { margin-top: 8px; padding: 10px; }
+    .epm-box .ringtone-card:first-child { margin-top: 0; }
+    .epm-box .epm-sub-grid > .ringtone-card { margin-top: 0; }
+    .epm-template-fields { display: grid; gap: 8px 14px; margin-bottom: 8px; }
+    .epm-template-fields:last-child { margin-bottom: 0; }
+    .epm-template-two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .epm-template-three-col { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .epm-template-fields > div { min-width: 0; }
+    .epm-template-fields label { margin-top: 0 !important; margin-bottom: 4px; }
+    .epm-template-fields input, .epm-template-fields select { width: 100%; min-width: 0; box-sizing: border-box; }
+    @media (max-width: 760px) {
+        .epm-template-two-col, .epm-template-three-col { grid-template-columns: minmax(0, 1fr); }
+    }
+
+    .epm-box .gen-full-width { width: 100%; }
+    .epm-sub-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 10px; margin-top: 0; }
+    .epm-stack > div { margin-bottom: 4px; }
+    .epm-box .ringtone-player-controls audio { max-width: 100%; }
+    .epm-box #selected_files_textarea { max-width: 100%; }
+
+    /* Narrow boxes: reflow instead of overflowing */
+    @container (min-width: 700px) { .epm-sub-grid { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); } }
+    @container (max-width: 640px) {
+        .ringtone-grid-item { grid-template-columns: minmax(0, 1fr) auto auto; }
+        .ringtone-grid-item > :nth-child(1) { grid-column: 1; grid-row: 1; }
+        .ringtone-grid-item > :nth-child(2) { grid-column: 2; grid-row: 1; }
+        .ringtone-grid-item > :nth-child(5) { grid-column: 3; grid-row: 1; }
+        .ringtone-grid-item > :nth-child(3) { grid-column: 1; grid-row: 2; min-width: 0; }
+        .ringtone-grid-item > :nth-child(4) { grid-column: 2 / 4; grid-row: 2; }
+        .epm-box .gen-pk-head { display: none; }
+        .epm-box .gen-pk-row { grid-template-columns: 78px repeat(4, minmax(0, 1fr)); padding-bottom: 6px; border-bottom: 1px solid #eee; margin-top: 6px; }
+        .epm-box .gen-pk-row > select[name$="_type"] { grid-column: 2 / 4; }
+        .epm-box .gen-pk-row > .gen-pk-slot { grid-column: 4 / 6; }
+        .epm-box .gen-pk-row > .pk-value { grid-column: 2 / 4; }
+        .epm-box .gen-pk-row > .pk-label { grid-column: 4; }
+        .epm-box .gen-pk-row > .pk-ext { grid-column: 5; }
+    }
+    @media (max-width: 1000px) {
+        .epm-dash { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+        .epm-box[data-span="2"] { grid-column: auto; }
+    }
+
     .scan-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
     .scan-table th, .scan-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
     .scan-table th { background: #f2f2f2; }
@@ -117,7 +215,7 @@ if (!defined('FREEPBX_IS_AUTH')) {
     .oss-btn-icon.online { color: #28a745; }
     .oss-btn-icon.offline { color: #dc3545; }
 
-    .ringtone-card { border: 1px solid #ccc; border-radius: 6px; padding: 12px; background: #fafafa; margin-top: 10px; }
+    .ringtone-card { border: 1px solid #ccc; border-radius: 6px; padding: 12px; background: #FCFCFC; margin-top: 10px; }
     .ringtone-list-container { border: 1px solid #e0e0e0; background: #fff; border-radius: 4px; padding: 4px 10px; margin-top: 8px; }
     
     .ringtone-grid-item { 
@@ -180,8 +278,9 @@ if (!defined('FREEPBX_IS_AUTH')) {
     
     .upload-controls-col {
         display: flex !important;
-        flex-direction: column !important;
-        align-items: flex-start !important;
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        align-items: center !important;
         gap: 8px !important;
         margin-top: 5px !important;
     }
@@ -265,6 +364,146 @@ if (!defined('FREEPBX_IS_AUTH')) {
     .noUi-horizontal { height: 12px; }
     .noUi-handle { height: 22px !important; width: 22px !important; top: -6px !important; border-radius: 50%; }
     .noUi-handle:after, .noUi-handle:before { display: none; }
+
+    /* One Line Keys dashboard box containing the legacy modal-launch buttons */
+    .epm-key-overview { display:flex; flex-direction:column; gap:8px; }
+    .epm-key-overview-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; min-height:58px; border:1px solid #ced4da; border-radius:5px; background:#f8f9fa; box-sizing:border-box; }
+    .epm-key-overview-label { display:flex; flex-direction:column; gap:5px; min-width:0; }
+    .epm-key-overview-label strong { color:#343a40; font-size:14px; }
+    .epm-key-summary { color:#0c5460; background:#e7f3fe; border-left:3px solid #2196F3; padding:4px 8px; font-size:12px; line-height:1.35; }
+    .epm-key-edit { flex:0 0 auto; display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border:1px solid #b8c7d1; border-radius:4px; background:#e7f3fe; color:#245269; cursor:pointer; font-weight:600; white-space:nowrap; }
+    .epm-key-edit:hover { background:#d5eaf9; border-color:#91b7cc; }
+    .epm-key-modal { display:flex; position:fixed; inset:0; z-index:20000; background:rgba(0,0,0,.48); padding:4vh 18px; box-sizing:border-box; align-items:center; justify-content:center; visibility:hidden; opacity:0; pointer-events:none; transition:opacity .22s ease, visibility 0s linear .30s; }
+    .epm-key-modal.is-open { visibility:visible; opacity:1; pointer-events:auto; transition:opacity .22s ease, visibility 0s linear 0s; }
+    .epm-key-modal-dialog { display:flex; flex-direction:column; width:min(1180px, 96vw); max-height:92vh; background:#fff; border:1px solid #aaa; border-radius:5px; box-shadow:0 8px 32px rgba(0,0,0,.35); overflow:hidden; opacity:0; transform:scale(.88) translateY(18px); transform-origin:center center; transition:transform .28s cubic-bezier(.2,.75,.25,1), opacity .22s ease; }
+    .epm-key-modal.is-open .epm-key-modal-dialog { opacity:1; transform:scale(1) translateY(0); }
+    @media (prefers-reduced-motion: reduce) { .epm-key-modal, .epm-key-modal-dialog { transition:none !important; } }
+    .epm-key-modal-head { display:flex; align-items:center; justify-content:space-between; gap:15px; padding:13px 16px; border-bottom:1px solid #ced4da; background:#f8f9fa; color:#555; font-size:16px; flex:0 0 auto; }
+    .epm-key-modal-x { border:0; background:transparent; color:#777; font-size:25px; line-height:1; cursor:pointer; padding:0 2px; }
+    .epm-key-modal-content { padding:12px 16px; overflow:auto; min-height:0; }
+    .epm-key-modal-content .epm-key-editor { border:0; box-shadow:none; margin:0; background:#fff; }
+    .epm-key-modal-content .epm-key-editor > .epm-box-body { padding:0; }
+    .epm-key-modal-foot { display:flex; align-items:center; gap:12px; padding:10px 16px; border-top:1px solid #ced4da; background:#f8f9fa; flex:0 0 auto; }
+    .epm-key-modal-note { color:#6c757d; font-size:12px; flex:1; }
+    .epm-key-modal-close { margin:0 !important; background:#6c757d !important; }
+    body.epm-key-modal-open { overflow:hidden; }
+    @media (max-width:700px) {
+      .epm-key-overview-row { align-items:flex-start; flex-direction:column; }
+      .epm-key-edit { align-self:flex-start; }
+      .epm-key-modal { padding:2vh 8px; }
+      .epm-key-modal-dialog { width:98vw; max-height:96vh; }
+      .epm-key-modal-content { padding:8px; }
+    }
+
+
+    /* OpenVPN Manager-inspired teal/green theme */
+    :root {
+        --epm-teal: #0b5960;
+        --epm-border: #5b9e8e;
+        --epm-pale-green: #d4edda;
+        --epm-success: #5cb85c;
+        --epm-info: #5bc0de;
+        --epm-warning: #f0ad4e;
+        --epm-danger: #d9534f;
+    }
+    .gen-tab-bar { border-bottom-color: var(--epm-border) !important; }
+    .gen-tab-btn { color: var(--epm-teal); background: #eef4f1; border-color: #b7d3c7; }
+    .gen-tab-btn.active { background: var(--epm-teal) !important; border-color: var(--epm-teal) !important; color: #fff !important; }
+    .gen-section-title { border-bottom-color: var(--epm-border) !important; color: var(--epm-teal) !important; }
+    .epm-box { border-color: var(--epm-border) !important; }
+    .epm-box-head { background: #ddecec !important; border-bottom-color: var(--epm-border) !important; color: var(--epm-teal) !important; }
+    .epm-box-title { color: var(--epm-teal) !important; }
+    .epm-grip:hover, .epm-tool:hover { color: var(--epm-teal) !important; }
+    .epm-tool:hover { background: #c9e1d7 !important; }
+    .epm-dash-reset, .gen-key-btn-reset { background: #6c757d !important; }
+    .epm-key-overview-row { border-color: #b7d3c7 !important; background: #f5f8f6 !important; }
+    .epm-key-overview-label strong { color: var(--epm-teal) !important; }
+    .epm-key-summary, .spec-note { background: #e3f0ec !important; border-left-color: var(--epm-border) !important; color: var(--epm-teal) !important; }
+    .epm-key-edit { background: #5bc0de !important; border-color: #46b8da !important; color: #fff !important; }
+    .epm-key-edit:hover { background: #31b0d5 !important; border-color: #269abc !important; }
+    .epm-key-modal-dialog { border-color: var(--epm-border) !important; }
+    .epm-key-modal-head, .epm-key-modal-foot { background: #ddecec !important; border-color: var(--epm-border) !important; }
+    .epm-key-modal-head { color: var(--epm-teal) !important; }
+    .epm-key-modal-x { color: var(--epm-teal) !important; }
+    .epm-key-modal-close { background: #6c757d !important; }
+    .ringtone-card, .oss-action-card { border-color: #b7d3c7 !important; background: #FCFCFC !important; }
+    .ringtone-list-container { border-color: #c6ddd4 !important; }
+    .ringtone-size-badge { background: #e3ece8 !important; color: #315e54 !important; }
+    .oss-table th, .scan-table th { background: #d6e4dd !important; }
+    .oss-table th, .oss-table td { border-color: var(--epm-border) !important; }
+    .gen-alert { background: var(--epm-pale-green) !important; color: #155724 !important; }
+    .flush-banner { background: #fcf8e3 !important; border-color: #faebcc !important; border-left-color: var(--epm-warning) !important; color: #8a6d3b !important; }
+    .warning-box { background: #fcf8e3 !important; border-color: #faebcc !important; border-left-color: var(--epm-warning) !important; color: #8a6d3b !important; }
+    .gen-btn { background: var(--epm-success); }
+    .gen-btn:hover { background: #449d44; }
+    .gen-btn-danger, .gen-key-btn-cancel { background: var(--epm-danger) !important; }
+    .upload-btn-aligned { background: #17a2b8 !important; }
+    .custom-file-btn { background: #6c757d !important; }
+    .noUi-connect { background: var(--epm-border) !important; }
+    @media (prefers-reduced-motion: reduce) { .epm-key-modal, .epm-key-modal-dialog { transition: none !important; } }
+
+    /* Green-forward OpenVPN palette refinement */
+    :root {
+        --epm-teal: #155b3b;
+        --epm-border: #65a783;
+        --epm-pale-green: #dcefe2;
+        --epm-success: #28a745;
+        --epm-info: #48a878;
+        --epm-warning: #e5a23b;
+        --epm-danger: #d9534f;
+    }
+    .epm-box { border-color: #65a783 !important; }
+    .epm-box-head { background: #dcefe2 !important; border-bottom-color: #65a783 !important; }
+    .epm-box-title, .epm-box-head { color: #155b3b !important; }
+    .gen-tab-btn.active { background: #237a4b !important; border-color: #237a4b !important; }
+    .gen-tab-bar, .gen-section-title { border-bottom-color: #65a783 !important; }
+    .epm-key-overview-row { background: #FCFCFC !important; border-color: #b8d8c3 !important; }
+    .epm-key-summary, .spec-note { background: #e4f2e8 !important; border-left-color: #48a878 !important; color: #155b3b !important; }
+    .epm-key-edit { background: #48a878 !important; border-color: #348e62 !important; color: #fff !important; }
+    .epm-key-edit:hover { background: #348e62 !important; border-color: #28784f !important; }
+    .epm-key-modal-head, .epm-key-modal-foot { background: ##EEF7F1 !important; border-color: #65a783 !important; }
+    .epm-key-modal-dialog { border-color: #65a783 !important; }
+    .ringtone-card, .oss-action-card { background: #FCFCFC !important; border-color: #b8d8c3 !important; }
+    .ringtone-list-container { border-color: #c7e0cf !important; }
+    .ringtone-size-badge { background: #e1eee5 !important; color: #285d3f !important; }
+    .oss-table th, .scan-table th { background: #dcefe2 !important; }
+    .oss-table th, .oss-table td { border-color: #65a783 !important; }
+    .gen-btn { background: #28a745 !important; }
+    .gen-btn:hover { background: #218838 !important; }
+    .upload-btn-aligned { background: #48a878 !important; }
+    .noUi-connect { background: #48a878 !important; }
+
+    /* Alternating green-tinted slot rows, similar to OpenVPN's striped tables */
+    .epm-key-modal-content .gen-lk-row:nth-child(odd),
+    .epm-key-modal-content .gen-mk-row:nth-child(odd),
+    .epm-key-modal-content .gen-pk-row:nth-of-type(even) {
+        background: #eaf4ed !important;
+    }
+    .epm-key-modal-content .gen-lk-row:nth-child(even),
+    .epm-key-modal-content .gen-mk-row:nth-child(even),
+    .epm-key-modal-content .gen-pk-row:nth-of-type(odd) {
+        background: #f8fbf9 !important;
+    }
+    .epm-key-modal-content .gen-lk-row,
+    .epm-key-modal-content .gen-mk-row,
+    .epm-key-modal-content .gen-pk-row {
+        border-bottom: 1px solid #c9dfd0 !important;
+        padding: 5px 6px;
+        border-radius: 3px;
+    }
+    .epm-key-modal-content .gen-lk-row:hover,
+    .epm-key-modal-content .gen-mk-row:hover,
+    .epm-key-modal-content .gen-pk-row:hover {
+        background: #dcefe2 !important;
+    }
+    .epm-key-modal-content .gen-lk-head,
+    .epm-key-modal-content .gen-mk-head,
+    .epm-key-modal-content .gen-pk-head {
+        background: #d3e8da !important;
+        color: #155b3b !important;
+        border-bottom: 1px solid #65a783;
+    }
+
 </style>
 
 <!-- ============================================================================ -->
@@ -737,25 +976,68 @@ function toggleOvpnState(ext, mac, enable) {
         processNext();
     }
 
+    var epmPendingDelete = null;
+
+    // Use an in-page confirmation for ringtone/logo deletion. Unlike window.confirm(),
+    // this cannot be suppressed by the browser's "don't allow this page to prompt again" setting.
     function confirmDeleteFile(filename, fileType) {
         if (!filename || filename === 'system') {
             alert("Please select a valid file to delete.");
             return false;
         }
-        if (confirm("Are you sure you want to permanently delete '" + filename + "' from the server?")) {
-            var targetForm = document.getElementById('delete_file_form');
-            document.getElementById('target_filename').value = filename;
-            document.getElementById('target_file_type').value = fileType;
-            
-            if (['ringtone', 'logo', 'template'].includes(fileType)) {
-                document.getElementById('delete_active_tab').value = 'tab_template';
-                epmStore(EPM_SCROLL_KEY, 'ringtone_section');
-                targetForm.action = window.location.pathname + '?display=yealink_epm';
-            }
-            
-            targetForm.submit();
+
+        if (fileType === 'ringtone' || fileType === 'logo') {
+            epmPendingDelete = { filename: filename, fileType: fileType };
+            var modal = document.getElementById('epmDeleteConfirmModal');
+            var name = document.getElementById('epmDeleteConfirmFilename');
+            var kind = document.getElementById('epmDeleteConfirmKind');
+            name.textContent = filename;
+            kind.textContent = (fileType === 'logo') ? 'logo / wallpaper' : 'ringtone';
+            modal.style.display = 'flex';
+            modal.setAttribute('aria-hidden', 'false');
+            document.getElementById('epmDeleteConfirmCancel').focus();
+            return false;
         }
+
+        // Keep existing confirmation behavior for other file types.
+        if (confirm("Are you sure you want to permanently delete '" + filename + "' from the server?")) {
+            submitDeleteFile(filename, fileType);
+        }
+        return false;
     }
+
+    function closeDeleteConfirmModal() {
+        var modal = document.getElementById('epmDeleteConfirmModal');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.setAttribute('aria-hidden', 'true');
+        }
+        epmPendingDelete = null;
+    }
+
+    function submitConfirmedDeleteFile() {
+        if (!epmPendingDelete) return;
+        var pending = epmPendingDelete;
+        closeDeleteConfirmModal();
+        submitDeleteFile(pending.filename, pending.fileType);
+    }
+
+    function submitDeleteFile(filename, fileType) {
+        var targetForm = document.getElementById('delete_file_form');
+        document.getElementById('target_filename').value = filename;
+        document.getElementById('target_file_type').value = fileType;
+
+        if (['ringtone', 'logo', 'template'].includes(fileType)) {
+            document.getElementById('delete_active_tab').value = 'tab_template';
+            epmStore(EPM_SCROLL_KEY, 'ringtone_section');
+            targetForm.action = window.location.pathname + '?display=yealink_epm';
+        }
+        targetForm.submit();
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && epmPendingDelete) closeDeleteConfirmModal();
+    });
 
     function calculateTotalRingtonePayloadSize() {
         var model = document.getElementById('select_phone_model').value;
@@ -980,82 +1262,142 @@ function toggleOvpnState(ext, mac, enable) {
         for (var i = 1; i <= 29; i++) {
             var row = document.getElementById('linekey_row_' + i);
             if (row) {
-                row.style.display = (i <= num) ? 'flex' : 'none';
+                row.style.display = (i <= num) ? '' : 'none';
             }
+        }
+        if (typeof refreshKeySummaries === 'function') { refreshKeySummaries(); }
+    }
+
+    // Per-model key layout and expansion sizes come from PHP ($yealink_model_keys / $expansion_key_sizes).
+    var epmModelSpecs = <?= json_encode($yealink_model_keys) ?>;
+    var epmExpKeySize = <?= json_encode($expansion_key_sizes) ?>;
+
+    function epmModelSpec(model) {
+        return epmModelSpecs[model] || epmModelSpecs['manual'];
+    }
+
+    function epmCurrentModel() {
+        var m = document.getElementById('select_phone_model');
+        return m ? m.value : 'manual';
+    }
+
+    // Memory keys are shown one page at a time: page 0 = the phone's built-in keys (if it has any),
+    // then one page per expansion module.
+    var memKeyPage = 0;
+
+    function memKeyBase() {
+        var b = document.getElementById('field_base_mem_keys');
+        return b ? (parseInt(b.value, 10) || 0) : 0;
+    }
+
+    function memKeyPageSize() {
+        var m = document.getElementById('select_exp_model');
+        var size = m ? (epmExpKeySize[m.value] || 0) : 0;
+        return size > 0 ? size : 20;
+    }
+
+    function memKeyRowPage(i, base, size) {
+        if (i <= base) { return 0; }
+        return (base > 0 ? 1 : 0) + Math.floor((i - base - 1) / size);
+    }
+
+    function setMemKeyPage(p) {
+        memKeyPage = p;
+        var el = document.getElementById('select_memkey_count');
+        updateMemkeyVisibility(el ? el.value : 0);
+    }
+
+    function buildMemkeyPageBar(num, base, size, pages) {
+        var bar = document.getElementById('memkey_pages');
+        var empty = document.getElementById('memkey_empty');
+        var head = document.getElementById('memkey_head');
+        if (empty) { empty.style.display = (num === 0) ? 'block' : 'none'; }
+        if (head) { head.style.display = (num === 0) ? 'none' : ''; }
+        if (!bar) { return; }
+        bar.innerHTML = '';
+        if (pages < 2) { bar.style.display = 'none'; return; }
+        bar.style.display = 'flex';
+        var expModel = document.getElementById('select_exp_model');
+        var hasExp = expModel && (epmExpKeySize[expModel.value] || 0) > 0;
+        for (var p = 0; p < pages; p++) {
+            var a, b, label;
+            if (base > 0 && p === 0) {
+                a = 1; b = Math.min(base, num);
+                label = 'Built-in: keys ' + a + '-' + b;
+            } else {
+                var k = p - (base > 0 ? 1 : 0);
+                a = base + k * size + 1;
+                b = Math.min(base + (k + 1) * size, num);
+                label = (hasExp ? 'Module ' + (k + 1) + ': ' : '') + 'keys ' + a + '-' + b;
+            }
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'gen-key-page' + (p === memKeyPage ? ' active' : '');
+            btn.textContent = label;
+            btn.onclick = (function (pp) { return function () { setMemKeyPage(pp); }; })(p);
+            bar.appendChild(btn);
         }
     }
 
     function updateMemkeyVisibility(count) {
         var num = parseInt(count, 10) || 0;
+        var base = memKeyBase();
+        var size = memKeyPageSize();
+        var pages = num > 0 ? memKeyRowPage(num, base, size) + 1 : 1;
+        if (memKeyPage >= pages) { memKeyPage = pages - 1; }
         for (var i = 1; i <= 180; i++) {
             var row = document.getElementById('memkey_row_' + i);
             if (row) {
-                row.style.display = (i <= num) ? 'flex' : 'none';
+                row.style.display = (i <= num && memKeyRowPage(i, base, size) === memKeyPage) ? '' : 'none';
             }
         }
+        buildMemkeyPageBar(num, base, size, pages);
+        if (typeof refreshKeySummaries === 'function') { refreshKeySummaries(); }
     }
 
-    function calculateTotalMemoryKeys() {
-        var baseMem = parseInt(document.getElementById('field_base_mem_keys').value) || 0;
+    function updateMemkeyNote() {
+        var el = document.getElementById('memkey_model_note');
+        if (!el) { return; }
+        var base = memKeyBase();
+        el.textContent = base > 0
+            ? 'This model has ' + base + ' built-in memory keys (memorykey.1-' + base + '); expansion module keys follow them.'
+            : 'This model has no built-in memory keys; only expansion module keys apply.';
+    }
+
+    // Slots = built-in keys for the selected model + keys on every selected expansion module.
+    // On first page load (isInit) never shrink what the saved template already uses.
+    function calculateTotalMemoryKeys(isInit) {
+        var baseMem = memKeyBase();
         var expModel = document.getElementById('select_exp_model').value;
         var expQty = parseInt(document.getElementById('select_exp_count').value) || 0;
-        
-        var expKeysPerUnit = 0;
-        if (expModel === 'EXP20') expKeysPerUnit = 20;
-        if (expModel === 'EXP40') expKeysPerUnit = 40;
-        if (expModel === 'EXP50') expKeysPerUnit = 60;
+        var expKeysPerUnit = epmExpKeySize[expModel] || 0;
 
         var totalMemKeys = baseMem + (expKeysPerUnit * expQty);
         var memElem = document.getElementById('select_memkey_count');
         if (memElem) {
+            if (isInit) { totalMemKeys = Math.max(totalMemKeys, parseInt(memElem.value, 10) || 0); }
             memElem.value = totalMemKeys;
             updateMemkeyVisibility(totalMemKeys);
         }
+        updateMemkeyNote();
     }
 
-    function handleModelSelect(model) {
+    function handleModelSelect(model, isInit) {
         var lineElem = document.getElementById('select_linekey_count');
         var baseMemElem = document.getElementById('field_base_mem_keys');
-        
-        var modelSpecs = {
-            "manual": { keys: 1,  lines: 1 },
-            "T19P":   { keys: 1,  lines: 1 },
-            "T21P":   { keys: 2,  lines: 2 },
-            "T23G":   { keys: 3,  lines: 3 },
-            "T27G":   { keys: 21, lines: 6 },
-            "T28P":   { keys: 6,  lines: 6 },
-            "T29G":   { keys: 27, lines: 16 },
-            "T30":    { keys: 1,  lines: 1 },
-            "T31G":   { keys: 2,  lines: 2 },
-            "T33G":   { keys: 4,  lines: 4 },
-            "T34W":   { keys: 4, lines: 4 },
-			"T40P":   { keys: 3,  lines: 3 },
-            "T41S":   { keys: 15, lines: 6 },
-            "T42S":   { keys: 15, lines: 6 },
-            "T43U":   { keys: 21, lines: 12 },
-			"T44U":   { keys: 21, lines: 12 },
-            "T46S":   { keys: 27, lines: 16 },
-            "T48S":   { keys: 29, lines: 16 },
-            "T53W":   { keys: 21, lines: 12 },
-            "T54W":   { keys: 27, lines: 16 },
-            "T57W":   { keys: 29, lines: 16 },
-            "T58A":   { keys: 27, lines: 16 },
-            "VP59":   { keys: 27, lines: 16 }
-        };
-
-        var spec = modelSpecs[model] || modelSpecs["manual"];
+        var spec = epmModelSpec(model);
 
         if (lineElem) {
-            lineElem.value = spec.keys;
-            updateLinekeyVisibility(spec.keys);
+            if (!isInit) { lineElem.value = spec.linekeys; }
+            updateLinekeyVisibility(lineElem.value);
         }
 
         restrictLineDropdownOptions(spec.lines);
 
-        if (baseMemElem && spec.mem >= 0) {
-            baseMemElem.value = spec.mem;
-        }
-        calculateTotalMemoryKeys();
+        if (baseMemElem) { baseMemElem.value = spec.memkeys; }
+        if (!isInit) { memKeyPage = 0; }
+        calculateTotalMemoryKeys(!!isInit);
+        if (typeof progKeyOnModelChange === 'function') { progKeyOnModelChange(model, spec.lines); }
         updateModelSpecsInfo(model);
     }
 
@@ -1392,7 +1734,7 @@ function toggleOvpnState(ext, mac, enable) {
 
         var modelElem = document.getElementById('select_phone_model');
         if (modelElem) {
-            handleModelSelect(modelElem.value);
+            handleModelSelect(modelElem.value, true);
             updateModelSpecsInfo(modelElem.value);
         }
 
@@ -1453,6 +1795,27 @@ function toggleOvpnState(ext, mac, enable) {
     <input type="hidden" id="delete_active_tab" name="active_tab" value="tab_global">
     <input type="hidden" name="current_loaded_template" value="<?= htmlspecialchars($formData['template_name']) ?>">
 </form>
+
+<!-- Accessible, browser-independent delete confirmation for ringtones and logos -->
+<div id="epmDeleteConfirmModal" class="gen-modal" role="dialog" aria-modal="true" aria-labelledby="epmDeleteConfirmTitle" aria-hidden="true"
+     style="display:none; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;"
+     onclick="if (event.target === this) closeDeleteConfirmModal();">
+    <div class="gen-modal-content epm-delete-confirm-card" style="width:460px; max-width:96vw; margin:0; padding:0; overflow:hidden; border:1px solid #a9cbb8; box-shadow:0 12px 36px rgba(0,0,0,.28);">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 18px; background:#dcefe3; border-bottom:1px solid #a9cbb8;">
+            <h3 id="epmDeleteConfirmTitle" style="margin:0; color:#155b3b; font-size:16px;">Confirm deletion</h3>
+            <button type="button" aria-label="Close confirmation" onclick="closeDeleteConfirmModal()" style="border:0; background:transparent; color:#426653; font-size:22px; line-height:1; cursor:pointer;">&times;</button>
+        </div>
+        <div style="padding:18px; color:#333;">
+            <p style="margin:0 0 10px;">Are you sure you want to permanently delete this <strong id="epmDeleteConfirmKind">file</strong> from the server?</p>
+            <div id="epmDeleteConfirmFilename" style="padding:9px 11px; background:#f1f7f3; border:1px solid #d2e5d9; border-radius:4px; overflow-wrap:anywhere; font-weight:600;"></div>
+            <p style="margin:12px 0 0; color:#8a4b08; font-size:12px;">This action cannot be undone.</p>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; background:#f7faf8; border-top:1px solid #e0e9e3;">
+            <button id="epmDeleteConfirmCancel" type="button" class="gen-btn" style="margin:0; background:#6c757d;" onclick="closeDeleteConfirmModal()">Cancel</button>
+            <button type="button" class="gen-btn-danger" style="margin:0; padding:9px 16px;" onclick="submitConfirmedDeleteFile()">Delete permanently</button>
+        </div>
+    </div>
+</div>
 
 <!-- MODALS -->
 <div id="viewConfigModal" class="gen-modal">
@@ -1667,8 +2030,8 @@ function toggleOvpnState(ext, mac, enable) {
 
     <div class="gen-tab-bar" style="display: flex; justify-content: space-between; align-items: center;">
         <div style="display: flex;">
-            <div id="btn_tab_global" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_global') ? 'active' : '' ?>" onclick="switchTab('tab_global')">Global Settings (y-configs)</div>
-            <div id="btn_tab_template" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_template') ? 'active' : '' ?>" onclick="switchTab('tab_template')">Template Manager (template.cfg)</div>
+            <div id="btn_tab_global" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_global') ? 'active' : '' ?>" onclick="switchTab('tab_global')">Global Settings</div>
+            <div id="btn_tab_template" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_template') ? 'active' : '' ?>" onclick="switchTab('tab_template')">Template Manager</div>
             <div id="btn_tab_devices" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_devices') ? 'active' : '' ?>" onclick="switchTab('tab_devices')">Device Manager</div>
         </div>
         
@@ -1685,7 +2048,6 @@ function toggleOvpnState(ext, mac, enable) {
     <div id="tab_global" class="gen-tab-content <?= ($formData['active_tab'] === 'tab_global') ? 'active' : '' ?>">
         <form id="main_cfg_form" method="POST" enctype="multipart/form-data">
             <input type="hidden" id="active_tab_field" name="active_tab" value="<?= htmlspecialchars($formData['active_tab']) ?>">
-            <input type="hidden" id="field_base_mem_keys" value="0">
 
             <div class="gen-key-row">
                 <div>
@@ -1888,7 +2250,7 @@ function toggleOvpnState(ext, mac, enable) {
 
     <!-- TAB 2: TEMPLATE MANAGER -->
     <div id="tab_template" class="gen-tab-content <?= ($formData['active_tab'] === 'tab_template') ? 'active' : '' ?>">
-        <div class="gen-load-box">
+        <div class="gen-load-box" style="width: 600px">
             <form method="POST" enctype="multipart/form-data">
                 <input type="hidden" id="load_tpl_active_tab_field" name="active_tab" value="tab_template">
                 <label>Active / Edit Template:</label>
@@ -1896,14 +2258,14 @@ function toggleOvpnState(ext, mac, enable) {
                     <?php 
                     $selected_tpl_option = $_POST['template_to_load'] ?? (!empty($formData['template_name']) ? $formData['template_name'] . '.template.cfg' : '');
                     ?>
-                    <select id="select_template_file" name="template_to_load" class="gen-full-width">
+                    <select id="select_template_file" name="template_to_load" style="width: 315px; flex: none;">
                         <option value="" <?= empty($selected_tpl_option) ? 'selected' : '' ?>>-- Select a template to edit --</option>
                         <?php foreach ($available_templates as $tpl_file => $tpl_label): ?>
                             <option value="<?= htmlspecialchars($tpl_file) ?>" <?= ($selected_tpl_option === $tpl_file) ? 'selected' : '' ?>><?= htmlspecialchars($tpl_label) ?></option>
                         <?php endforeach; ?>
                     </select>
                     <button type="submit" name="load_template" class="gen-btn" style="margin-top:0; background:#6c757d;">Load</button>
-                    <button type="button" class="gen-btn" style="margin-top:0; background:#17a2b8;" onclick="downloadSelectedTemplate()">Download</button>
+                    <button type="button" class="gen-btn" title="Files Saved to /tftpboot/templates/" style="margin-top:0; background:#17a2b8;" onclick="downloadSelectedTemplate()">Download</button>
                     <button type="button" class="gen-btn-danger" style="margin-top:0;" onclick="confirmDeleteFile(document.getElementById('select_template_file').value, 'template')">Delete</button>
                 </div>
             </form>
@@ -1913,7 +2275,7 @@ function toggleOvpnState(ext, mac, enable) {
                 <div style="display:flex; align-items:center; gap:10px;">
                     <label style="margin:0; font-weight:bold; white-space:nowrap; font-size:12px;">Upload External Template:</label>
                     <input type="file" name="template_upload" accept=".cfg,.template.cfg" style="padding:4px; font-size:12px;">
-                    <button type="submit" name="upload_template_file" class="gen-btn" style="margin:0; padding:6px 12px; font-size:12px; background:#28a745;">Upload Template File</button>
+                    <button type="submit" name="upload_template_file" class="gen-btn" style="margin:0; padding:6px 12px; font-size:12px; background:#28a745;" title="Files Saved to /tftpboot/templates/">Upload Template File</button>
                 </div>
             </form>
         </div>
@@ -1922,128 +2284,118 @@ function toggleOvpnState(ext, mac, enable) {
             <input type="hidden" name="active_tab" value="tab_template">
             <input type="hidden" name="current_loaded_template" value="<?= htmlspecialchars($formData['template_name']) ?>">
 
-            <div class="gen-key-row">
-                <div>
-                    <label>Template Name:</label>
-                    <input type="text" class="gen-full-width" name="template_name" placeholder="e.g., T28_Reception" value="<?= htmlspecialchars($formData['template_name']) ?>">
-                </div>
-                <div>
-                    <label>Phone Model Presets:</label>
-                    <select id="select_phone_model" name="phone_model" class="gen-full-width" onchange="handleModelSelect(this.value)">
-                        <?php foreach ($yealink_models as $m_key => $m_label): ?>
-                            <option value="<?= $m_key ?>" <?= ($formData['phone_model'] === $m_key) ? 'selected' : '' ?>><?= $m_label ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
+            <div class="epm-dash-bar">
+                <span class="epm-dash-hint"><i class="fa fa-arrows"></i> Drag a box by its grip to rearrange. <i class="fa fa-arrows-h"></i> toggles half / full width, <i class="fa fa-chevron-up"></i> collapses. Layout is remembered in this browser.</span>
+                <button type="button" class="gen-btn epm-dash-reset" onclick="epmDashReset()">Reset layout</button>
             </div>
 
-            <div class="gen-key-row">
-                <div>
-                    <label>Expansion Module Model:</label>
-                    <select id="select_exp_model" name="exp_model" class="gen-full-width" onchange="handleExpSelect()">
-                        <?php foreach ($expansion_models as $e_key => $e_label): ?>
-                            <option value="<?= $e_key ?>" <?= ($formData['exp_model'] === $e_key) ? 'selected' : '' ?>><?= $e_label ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div>
-                    <label>Expansion Quantity:</label>
-                    <select id="select_exp_count" name="exp_count" class="gen-full-width" onchange="handleExpSelect()">
-                        <option value="0" <?= ($formData['exp_count'] === '0') ? 'selected' : '' ?>>-- None --</option>
-                        <option value="1" <?= ($formData['exp_count'] === '1') ? 'selected' : '' ?>>1 Unit</option>
-                        <option value="2" <?= ($formData['exp_count'] === '2') ? 'selected' : '' ?>>2 Units</option>
-                        <option value="3" <?= ($formData['exp_count'] === '3') ? 'selected' : '' ?>>3 Units</option>
-                    </select>
-                </div>
-            </div>
+            <div id="epm_dash" class="epm-dash">
+                <!-- Template configuration dashboard box -->
+                <section class="epm-box" id="box_template_settings" data-box="template_settings" data-span="1">
+                    <header class="epm-box-head">
+                        <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
+                        <strong class="epm-box-title">Template Settings</strong>
+                        
+                        <span class="epm-box-tools">
+                            <button type="button" class="epm-tool" data-act="span" title="Half / full width"><i class="fa fa-arrows-h"></i></button>
+                            <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
+                        </span>
+                    </header>
+                    <div class="epm-box-body">
+                        <div class="epm-template-fields epm-template-two-col">
+                            <div>
+                                <label>Template Name:</label>
+                                <input type="text" class="gen-full-width" name="template_name" placeholder="e.g., T28_Reception" value="<?= htmlspecialchars($formData['template_name']) ?>">
+                            </div>
+                            <div>
+                                <label>Phone Model Presets:</label>
+                                <select id="select_phone_model" name="phone_model" class="gen-full-width" onchange="handleModelSelect(this.value)">
+                                    <?php foreach ($yealink_models as $m_key => $m_label): ?>
+                                        <option value="<?= $m_key ?>" <?= ($formData['phone_model'] === $m_key) ? 'selected' : '' ?>><?= $m_label ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div>
+                                <label>Expansion Module Model:</label>
+                                <select id="select_exp_model" name="exp_model" class="gen-full-width" onchange="handleExpSelect()">
+                                    <?php foreach ($expansion_models as $e_key => $e_label): ?>
+                                        <option value="<?= $e_key ?>" <?= ($formData['exp_model'] === $e_key) ? 'selected' : '' ?>><?= $e_label ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div>
+                                <label>Expansion Quantity:</label>
+                                <select id="select_exp_count" name="exp_count" class="gen-full-width" onchange="handleExpSelect()">
+                                    <option value="0" <?= ($formData['exp_count'] === '0') ? 'selected' : '' ?>>-- None --</option>
+                                    <option value="1" <?= ($formData['exp_count'] === '1') ? 'selected' : '' ?>>1 Unit</option>
+                                    <option value="2" <?= ($formData['exp_count'] === '2') ? 'selected' : '' ?>>2 Units</option>
+                                    <option value="3" <?= ($formData['exp_count'] === '3') ? 'selected' : '' ?>>3 Units</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="epm-template-fields epm-template-three-col">
+                            <div>
+                                <label>SIP Port:</label>
+                                <input type="text" class="gen-full-width" name="sip_port" placeholder="<?= htmlspecialchars($default_sip_port) ?>" value="<?= htmlspecialchars($formData['sip_port']) ?>">
+                            </div>
+                            <div>
+                                <label>SIP Listen Port:</label>
+                                <input type="text" class="gen-full-width" name="sip_listen_port" placeholder="5062" value="<?= htmlspecialchars($formData['sip_listen_port']) ?>">
+                            </div>
+                            <div>
+                                <label>Voicemail Extension Number:</label>
+                                <input type="text" class="gen-full-width" name="voicemail_number" placeholder="*97" value="<?= htmlspecialchars($formData['voicemail_number']) ?>">
+                            </div>
+                        </div>
+                    </div>
+                </section>
 
-            <div class="gen-key-row">
-                <div>
-                    <label>SIP Port:</label>
-                    <input type="text" class="gen-full-width" name="sip_port" placeholder="<?= htmlspecialchars($default_sip_port) ?>" value="<?= htmlspecialchars($formData['sip_port']) ?>">
-                </div>
-                <div>
-                    <label>SIP Listen Port:</label>
-                    <input type="text" class="gen-full-width" name="sip_listen_port" placeholder="5062" value="<?= htmlspecialchars($formData['sip_listen_port']) ?>">
-                </div>
-                <div>
-                    <label>Voicemail Extension Number:</label>
-                    <input type="text" class="gen-full-width" name="voicemail_number" placeholder="*97" value="<?= htmlspecialchars($formData['voicemail_number']) ?>">
-                </div>
-            </div>
 
-            <h3 class="gen-section-title">Line Keys BLF Settings</h3>
-            <label>Number of Line Key Slots:</label>
-            <select id="select_linekey_count" name="linekey_count" class="gen-full-width" onchange="updateLinekeyVisibility(this.value)">
-                <?php for ($l_cnt = 1; $l_cnt <= 29; $l_cnt++): ?>
-                    <option value="<?= $l_cnt ?>" <?= ($l_cnt == $max_linekeys) ? 'selected' : '' ?>><?= $l_cnt ?> Line Keys</option>
-                <?php endfor; ?>
-            </select>
+                <!-- LINE KEYS -->
+                <!-- Combined Keys dashboard box -->
+<section class="epm-box" id="box_linekeys_launcher" data-box="linekeys" data-span="1">
+  <header class="epm-box-head">
+    <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
+    <strong class="epm-box-title">Line Keys</strong>
+    
+    <span class="epm-box-tools">
+      <button type="button" class="epm-tool" data-act="span" title="Half / full width"><i class="fa fa-arrows-h"></i></button>
+      <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
+    </span>
+  </header>
+  <div class="epm-box-body">
+    <div class="epm-key-overview">
+      <div class="epm-key-overview-row">
+        <div class="epm-key-overview-label"><strong>Line Keys</strong><span id="summary_linekeys" class="epm-key-summary"></span></div>
+        <button type="button" class="epm-key-edit" onclick="openEpmKeyModal('keyModal_linekeys')" aria-label="Edit Line Keys" title="Edit Line Keys"><i class="fa fa-pencil"></i> Edit Line Keys</button>
+      </div>
+      <div class="epm-key-overview-row">
+        <div class="epm-key-overview-label"><strong>Memory / Expansion Keys</strong><span id="summary_memkeys" class="epm-key-summary"></span></div>
+        <button type="button" class="epm-key-edit" onclick="openEpmKeyModal('keyModal_memkeys')" aria-label="Edit Memory Keys" title="Edit Memory Keys"><i class="fa fa-pencil"></i> Edit Memory Keys</button>
+      </div>
+      <div class="epm-key-overview-row">
+        <div class="epm-key-overview-label"><strong>Programmable Keys</strong><span id="summary_progkeys" class="epm-key-summary"></span></div>
+        <button type="button" class="epm-key-edit" onclick="openEpmKeyModal('keyModal_progkeys')" aria-label="Edit Programmable Keys" title="Edit Programmable Keys"><i class="fa fa-pencil"></i> Edit Programmable Keys</button>
+      </div>
+    </div>
+  </div>
+</section>
 
-            <div style="margin-top:10px;">
-            <?php for ($i = 1; $i <= 29; $i++): ?>
-                <div id="linekey_row_<?= $i ?>" class="gen-key-row" style="display: <?= ($i <= $max_linekeys) ? 'flex' : 'none' ?>;">
-                    <?php if ($i === 1): ?>
-                        <select name="linekey_1_type" style="background-color: #e9ecef; pointer-events: none;" readonly tabindex="-1">
-                            <option value="15" selected>Line (15)</option>
-                        </select>
-                        <input type="text" name="linekey_1_value" placeholder="Extension Number" value="<?= htmlspecialchars($formData["linekey_1_value"] ?? '') ?>" readonly style="background-color: #e9ecef;">
-                        <input type="text" name="linekey_1_label" placeholder="Extension Name" value="<?= htmlspecialchars($formData["linekey_1_label"] ?? '') ?>" readonly style="background-color: #e9ecef;">
-                        <input type="text" name="linekey_1_pickup" placeholder="Pickup (**)" value="<?= htmlspecialchars($formData["linekey_1_pickup"] ?? '') ?>" readonly style="background-color: #e9ecef;">
-                        <select name="linekey_1_line">
-                            <?php 
-                            $lk_line_1 = $formData["linekey_1_line"] ?? '1';
-                            for ($l = 1; $l <= 16; $l++): 
-                            ?>
-                                <option value="<?= $l ?>" <?= ($lk_line_1 == $l) ? 'selected' : '' ?>>Line <?= $l ?></option>
-                            <?php endfor; ?>
-                        </select>
-                    <?php else: ?>
-                        <select name="linekey_<?= $i ?>_type">
-                            <?php 
-                            $current_type = $formData["linekey_{$i}_type"] ?? '16';
-                            foreach ($dss_key_types as $k_code => $k_label): 
-                            ?>
-                                <option value="<?= $k_code ?>" <?= ($current_type == $k_code) ? 'selected' : '' ?>><?= $k_label ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <input type="text" name="linekey_<?= $i ?>_value" placeholder="Line Key <?= $i ?> Extension" value="<?= htmlspecialchars($formData["linekey_{$i}_value"] ?? '') ?>">
-                        <input type="text" name="linekey_<?= $i ?>_label" placeholder="Label" value="<?= htmlspecialchars($formData["linekey_{$i}_label"] ?? '') ?>">
-                        <input type="text" name="linekey_<?= $i ?>_pickup" placeholder="Pickup (**)" value="<?= htmlspecialchars($formData["linekey_{$i}_pickup"] ?? '**') ?>">
-                        <select name="linekey_<?= $i ?>_line">
-                            <?php 
-                            $current_line = $formData["linekey_{$i}_line"] ?? '1';
-                            for ($l = 1; $l <= 16; $l++): 
-                            ?>
-                                <option value="<?= $l ?>" <?= ($current_line == $l) ? 'selected' : '' ?>>Line <?= $l ?></option>
-                            <?php endfor; ?>
-                        </select>
-                    <?php endif; ?>
-                </div>
-            <?php endfor; ?>
-            </div>
+                
+                
 
-            <h3 class="gen-section-title">Memory Keys BLF Settings (Physical/Expansion)</h3>
-            <label>Number of Memory Key Slots:</label>
-            <select id="select_memkey_count" name="memkey_count" class="gen-full-width" onchange="updateMemkeyVisibility(this.value)">
-                <option value="0" <?= (0 == $max_memkeys) ? 'selected' : '' ?>>0 Slots (Disabled)</option>
-                <?php for ($k = 1; $k <= 180; $k++): ?>
-                    <option value="<?= $k ?>" <?= ($k == $max_memkeys) ? 'selected' : '' ?>><?= $k ?> Slots</option>
-                <?php endfor; ?>
-            </select>
-
-            <div style="margin-top:10px;">
-            <?php for ($i = 1; $i <= 180; $i++): ?>
-                <div id="memkey_row_<?= $i ?>" class="gen-key-row" style="display: <?= ($i <= $max_memkeys) ? 'flex' : 'none' ?>;">
-                    <input type="text" name="memkey_<?= $i ?>_value" placeholder="Memory Key <?= $i ?> Extension" value="<?= htmlspecialchars($formData["memkey_{$i}_value"] ?? '') ?>">
-                    <input type="text" name="memkey_<?= $i ?>_pickup" placeholder="Pickup Value" value="<?= htmlspecialchars($formData["memkey_{$i}_pickup"] ?? '**') ?>">
-                </div>
-            <?php endfor; ?>
-            </div>
-
-            <div id="ringtone_section"></div>
-            <h3 class="gen-section-title">Ringtone Management & Provisioning</h3>
-
+                <!-- RINGTONES + LOGO -->
+                <section class="epm-box" id="ringtone_section" data-box="ringtones" data-span="1">
+                    <header class="epm-box-head">
+                        <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
+                        <strong class="epm-box-title">Ringtones</strong>
+                       
+                        <span class="epm-box-tools">
+                            <button type="button" class="epm-tool" data-act="span" title="Half / full width"><i class="fa fa-arrows-h"></i></button>
+                            <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
+                        </span>
+                    </header>
+                    <div class="epm-box-body">
             <div id="flush_banner_container" class="flush-banner" style="display: <?= $show_flush_ringtone_btn ? 'block' : 'none' ?>;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div>
@@ -2056,7 +2408,7 @@ function toggleOvpnState(ext, mac, enable) {
             </div>
 
             <div class="ringtone-card">
-                <label style="margin-top:0;">1. Provision Uploaded Sound Files to Phone:</label>
+                <label style="margin-top:0;">Provision Uploaded Sound Files to Phone:</label>
                 <div id="ringtone_spec_note" class="spec-note">Loading specs...</div>
                 
                 <p style="font-size:12px; color:#666; margin-top:8px; margin-bottom:6px;">Check ringtones to include them in the template provision file (unchecking removes them from the phone):</p>
@@ -2133,24 +2485,41 @@ function toggleOvpnState(ext, mac, enable) {
                 <div id="ringtone_overlimit_warning" class="warning-box" style="display:none;"></div>
 
                 <div style="margin-top:15px; border-top:1px solid #e0e0e0; padding-top:10px;">
-                    <label style="margin-top:0; margin-bottom:8px;">Upload New Ringtones:</label>
+                    <label style="margin-top:0; margin-bottom:8px;" title="Files Saved to /PhoneSetting/ringtones">Upload New Ringtones:</label>
                     
                     <div class="upload-controls-col">
                         <label for="ringtone_file_input" class="custom-file-btn">Browse Files</label>
                         <input type="file" id="ringtone_file_input" accept=".wav,.mp3" multiple style="display:none;" onchange="updateVerticalFileList(this)">
                         
-                        <button type="button" id="async_upload_btn" onclick="uploadRingtonesAsync(event)" class="upload-btn-aligned">
+                        <button type="button" id="async_upload_btn" onclick="uploadRingtonesAsync(event)" class="upload-btn-aligned" title="Files Saved to /PhoneSetting/ringtones">
                             Upload Ringtones
                         </button>
 
+                        <div style="flex-basis:100%; height:0;"></div>
                         <textarea id="selected_files_textarea" readonly placeholder="No files selected"></textarea>
                     </div>
                 </div>
             </div>
 
-            <div class="ringtone-card" style="margin-top:15px;">
-                <label style="margin-top:0;">2. Default Account Ringtone (account.1.ringtone.ring_type):</label>
-                <p style="font-size:12px; color:#666; margin-top:2px; margin-bottom:10px;">Select the primary ringtone assigned for incoming calls on Account 1:</p>
+                    </div>
+                </section>
+
+                <!-- Separate dashboard box for account ringtone defaults and wallpaper/logo -->
+                <section class="epm-box" id="box_ringtone_defaults" data-box="ringtone_defaults" data-span="1">
+                    <header class="epm-box-head">
+                        <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
+                        <strong class="epm-box-title">Ringtone Defaults &amp; Wallpaper</strong>
+                        
+                        <span class="epm-box-tools">
+                            <button type="button" class="epm-tool" data-act="span" title="Half / full width"><i class="fa fa-arrows-h"></i></button>
+                            <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
+                        </span>
+                    </header>
+                    <div class="epm-box-body">
+                        <div class="epm-sub-grid">
+            <div class="ringtone-card" >
+                <label style="margin-top:0;">Default Account Ringtone:</label>
+                <p style="font-size:12px; color:#666; margin-top:2px; margin-bottom:10px;">Ringtone for incoming calls on Account 1:</p>
 
                 <select id="account_ringtone_select" name="account_ringtone" class="gen-full-width">
                     <optgroup label="Built-in & System Ringtones">
@@ -2177,11 +2546,12 @@ function toggleOvpnState(ext, mac, enable) {
                 </select>
             </div>
 
-            <h3 class="gen-section-title">Wallpaper / Logo Customization</h3>
+                            <div class="ringtone-card">
+                                <label style="margin-top:0;">Wallpaper / Logo </small>:</label>
             <div id="logo_spec_note" class="spec-note">Loading specs...</div>
-            <div class="gen-key-row" style="margin-top:10px;">
+            <div class="epm-stack">
                 <div>
-                    <label>Select Existing Wallpaper / Logo File:</label>
+                    <label style="margin-top:6px;">Existing file:</label>
                     <div style="display: flex; gap: 5px;">
                         <select id="select_logo_file" name="logo_file" class="gen-full-width">
                             <option value="">Disabled (mode = 0)</option>
@@ -2194,19 +2564,224 @@ function toggleOvpnState(ext, mac, enable) {
                     </div>
                 </div>
                 <div>
-                    <label>Upload New Wallpaper to /PhoneSettings/logo/:</label>
+                    <label style="margin-top:6px;" title="Files saved to /PhoneSettings/logo/">Upload New Wallpaper / Logo:</label>
                     <input type="file" name="logo_upload" class="gen-full-width" accept=".dob,.jpg,.png,.bmp">
                 </div>
             </div>
 
-            <h3 class="gen-section-title">Template Custom Key / Value Additions</h3>
-            <label>Add raw Yealink configuration flags for this template (One per line):</label>
-            <textarea name="custom_inputs" class="gen-textarea"><?= htmlspecialchars($formData['custom_inputs']) ?></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </section>
 
-            <?php if (!empty($generated_template_cfg)): ?>
-                <h3 class="gen-section-title">Generated Template Output</h3>
-                <textarea readonly class="gen-textarea" style="height:250px;"><?= htmlspecialchars($generated_template_cfg) ?></textarea>
-            <?php endif; ?>
+                
+                
+
+                <section class="epm-box" id="box_custom_inputs" data-box="custom_inputs" data-span="1">
+                    <header class="epm-box-head">
+                        <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
+                        <strong class="epm-box-title">Template Custom Key / Value Additions</strong>
+                        
+                        <span class="epm-box-tools">
+                            <button type="button" class="epm-tool" data-act="span" title="Half / full width"><i class="fa fa-arrows-h"></i></button>
+                            <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
+                        </span>
+                    </header>
+                    <div class="epm-box-body">
+                        <label>Add raw Yealink configuration flags for this template (One per line):</label>
+                        <textarea name="custom_inputs" class="gen-textarea"><?= htmlspecialchars($formData['custom_inputs']) ?></textarea>
+                    </div>
+                </section>
+
+                <?php if (!empty($generated_template_cfg)): ?>
+                <section class="epm-box" id="box_generated_output" data-box="generated_output" data-span="1">
+                    <header class="epm-box-head">
+                        <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
+                        <strong class="epm-box-title">Generated Template Output</strong>
+                        
+                        <span class="epm-box-tools">
+                            <button type="button" class="epm-tool" data-act="span" title="Half / full width"><i class="fa fa-arrows-h"></i></button>
+                            <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
+                        </span>
+                    </header>
+                    <div class="epm-box-body">
+                        <textarea readonly class="gen-textarea" style="height:250px;"><?= htmlspecialchars($generated_template_cfg) ?></textarea>
+                    </div>
+                </section>
+                <?php endif; ?>
+            </div>
+
+<div class="epm-key-modal" id="keyModal_linekeys" aria-hidden="true">
+  <div class="epm-key-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="keyModalTitle_linekeys">
+    <div class="epm-key-modal-head">
+      <strong id="keyModalTitle_linekeys"><i class="fa fa-key" aria-hidden="true"></i>&nbsp; Line Keys</strong>
+      <button type="button" class="epm-key-modal-x" aria-label="Close" onclick="closeEpmKeyModal('keyModal_linekeys')">&times;</button>
+    </div>
+    <div class="epm-key-modal-content"><section class="epm-box epm-key-editor" id="box_linekeys">
+                    <div class="epm-box-body">
+                        <div class="epm-toolbar">
+                            <label for="select_linekey_count">Slots</label>
+                            <select id="select_linekey_count" name="linekey_count" onchange="updateLinekeyVisibility(this.value)">
+                                <?php for ($l_cnt = 1; $l_cnt <= 29; $l_cnt++): ?>
+                                    <option value="<?= $l_cnt ?>" <?= ($l_cnt == $max_linekeys) ? 'selected' : '' ?>><?= $l_cnt ?> Line Keys</option>
+                                <?php endfor; ?>
+                            </select>
+                            <span class="epm-toolbar-note">Defaults to the model's key count when you change the phone model.</span>
+                        </div>
+                        <div class="epm-scroll">
+            <div class="gen-kh gen-lk-head"><span class="gen-key-num"></span><span>Type</span><span>Extension</span><span>Label</span><span>Pickup</span><span>Line</span></div>
+            <div style="margin-top:10px;">
+            <?php for ($i = 1; $i <= 29; $i++): ?>
+                <div id="linekey_row_<?= $i ?>" class="gen-key-row gen-lk-row" style="<?= ($i <= $max_linekeys) ? '' : 'display: none;' ?>">
+                    <span class="gen-key-num"><?= $i ?></span>
+                    <?php if ($i === 1): ?>
+                        <select name="linekey_1_type" style="background-color: #e9ecef; pointer-events: none;" readonly tabindex="-1">
+                            <option value="15" selected>Line (15)</option>
+                        </select>
+                        <input type="text" name="linekey_1_value" placeholder="Extension Number" value="<?= htmlspecialchars($formData["linekey_1_value"] ?? '') ?>" readonly style="background-color: #e9ecef;">
+                        <input type="text" name="linekey_1_label" placeholder="Extension Name" value="<?= htmlspecialchars($formData["linekey_1_label"] ?? '') ?>" readonly style="background-color: #e9ecef;">
+                        <input type="text" name="linekey_1_pickup" placeholder="Pickup (**)" value="<?= htmlspecialchars($formData["linekey_1_pickup"] ?? '') ?>" readonly style="background-color: #e9ecef;">
+                        <select name="linekey_1_line">
+                            <?php 
+                            $lk_line_1 = $formData["linekey_1_line"] ?? '1';
+                            for ($l = 1; $l <= 16; $l++): 
+                            ?>
+                                <option value="<?= $l ?>" <?= ($lk_line_1 == $l) ? 'selected' : '' ?>>Line <?= $l ?></option>
+                            <?php endfor; ?>
+                        </select>
+                    <?php else: ?>
+                        <select name="linekey_<?= $i ?>_type">
+                            <?php 
+                            $current_type = $formData["linekey_{$i}_type"] ?? '16';
+                            foreach ($dss_key_types as $k_code => $k_label): 
+                            ?>
+                                <option value="<?= $k_code ?>" <?= ($current_type == $k_code) ? 'selected' : '' ?>><?= $k_label ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <input type="text" name="linekey_<?= $i ?>_value" placeholder="Line Key <?= $i ?> Extension" value="<?= htmlspecialchars($formData["linekey_{$i}_value"] ?? '') ?>">
+                        <input type="text" name="linekey_<?= $i ?>_label" placeholder="Label" value="<?= htmlspecialchars($formData["linekey_{$i}_label"] ?? '') ?>">
+                        <input type="text" name="linekey_<?= $i ?>_pickup" placeholder="Pickup (**)" value="<?= htmlspecialchars($formData["linekey_{$i}_pickup"] ?? '**') ?>">
+                        <select name="linekey_<?= $i ?>_line">
+                            <?php 
+                            $current_line = $formData["linekey_{$i}_line"] ?? '1';
+                            for ($l = 1; $l <= 16; $l++): 
+                            ?>
+                                <option value="<?= $l ?>" <?= ($current_line == $l) ? 'selected' : '' ?>>Line <?= $l ?></option>
+                            <?php endfor; ?>
+                        </select>
+                    <?php endif; ?>
+                </div>
+            <?php endfor; ?>
+            </div>
+
+                        </div>
+                    </div>
+                </section></div>
+    <div class="epm-key-modal-foot">
+      <span class="epm-key-modal-note">Changes are included when you save the template.</span>
+      <button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal('keyModal_linekeys')">Close</button>
+    </div>
+  </div>
+</div>
+<div class="epm-key-modal" id="keyModal_memkeys" aria-hidden="true">
+  <div class="epm-key-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="keyModalTitle_memkeys">
+    <div class="epm-key-modal-head">
+      <strong id="keyModalTitle_memkeys"><i class="fa fa-key" aria-hidden="true"></i>&nbsp; Memory / Expansion Keys</strong>
+      <button type="button" class="epm-key-modal-x" aria-label="Close" onclick="closeEpmKeyModal('keyModal_memkeys')">&times;</button>
+    </div>
+    <div class="epm-key-modal-content"><section class="epm-box epm-key-editor" id="box_memkeys">
+                    <div class="epm-box-body">
+                        <input type="hidden" id="field_base_mem_keys" value="0">
+                        <div class="epm-toolbar">
+                            <label for="select_memkey_count">Slots</label>
+                            <select id="select_memkey_count" name="memkey_count" onchange="updateMemkeyVisibility(this.value)">
+                                <option value="0" <?= (0 == $max_memkeys) ? 'selected' : '' ?>>0 Slots (Disabled)</option>
+                                <?php for ($k = 1; $k <= 180; $k++): ?>
+                                    <option value="<?= $k ?>" <?= ($k == $max_memkeys) ? 'selected' : '' ?>><?= $k ?> Slots</option>
+                                <?php endfor; ?>
+                            </select>
+                            <span id="memkey_model_note" class="epm-toolbar-note"></span>
+                        </div>
+                        <div id="memkey_pages" class="gen-key-pages" style="display:none;"></div>
+                        <p id="memkey_empty" class="gen-key-empty" style="display:none;">No memory key slots. This model has no built-in memory keys; pick an expansion module above, or set a slot count.</p>
+                        <div class="epm-scroll">
+            <div id="memkey_head" class="gen-kh gen-mk-head"><span class="gen-key-num"></span><span>Extension</span><span>Pickup</span></div>
+            <div style="margin-top:10px;">
+            <?php for ($i = 1; $i <= 180; $i++): ?>
+                <div id="memkey_row_<?= $i ?>" class="gen-key-row gen-mk-row" style="<?= ($i <= $max_memkeys) ? '' : 'display: none;' ?>">
+                    <span class="gen-key-num"><?= $i ?></span>
+                    <input type="text" name="memkey_<?= $i ?>_value" placeholder="Memory Key <?= $i ?> Extension" value="<?= htmlspecialchars($formData["memkey_{$i}_value"] ?? '') ?>">
+                    <input type="text" name="memkey_<?= $i ?>_pickup" placeholder="Pickup Value" value="<?= htmlspecialchars($formData["memkey_{$i}_pickup"] ?? '**') ?>">
+                </div>
+            <?php endfor; ?>
+            </div>
+
+                        </div>
+                    </div>
+                </section></div>
+    <div class="epm-key-modal-foot">
+      <span class="epm-key-modal-note">Changes are included when you save the template.</span>
+      <button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal('keyModal_memkeys')">Close</button>
+    </div>
+  </div>
+</div>
+<div class="epm-key-modal" id="keyModal_progkeys" aria-hidden="true">
+  <div class="epm-key-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="keyModalTitle_progkeys">
+    <div class="epm-key-modal-head">
+      <strong id="keyModalTitle_progkeys"><i class="fa fa-key" aria-hidden="true"></i>&nbsp; Programmable Keys</strong>
+      <button type="button" class="epm-key-modal-x" aria-label="Close" onclick="closeEpmKeyModal('keyModal_progkeys')">&times;</button>
+    </div>
+    <div class="epm-key-modal-content"><section class="epm-box epm-key-editor" id="box_progkeys">
+                    <div class="epm-box-body">
+                        <div class="epm-toolbar">
+                            <span id="progkey_model_note" class="epm-toolbar-note"></span>
+                            <button type="button" class="gen-key-btn-reset" onclick="progKeyResetDefaults()">Reset to default</button>
+                        </div>
+                        <p class="gen-key-note">Only SoftKey 1-4 show a label on screen. Keys left at their factory function are not written to the template. Mute (Cancel on T21/T23) only takes effect when features.keep_mute.enable = 0.</p>
+                        <div class="epm-scroll">
+                        <div class="gen-kh gen-pk-head"><span class="gen-pk-name">Key</span><span>Type</span><span>Line / History</span><span>Value</span><span>Label</span><span>Extension</span></div>
+
+                        <?php foreach ($prog_key_names as $pid => $pname):
+                            $pk_type = (string)($formData["progkey_{$pid}_type"] ?? '0');
+                            $pk_line = (string)($formData["progkey_{$pid}_line"] ?? '1');
+                            $pk_hist = (string)($formData["progkey_{$pid}_hist"] ?? '0');
+                        ?>
+                        <div id="progkey_row_<?= $pid ?>" class="gen-key-row gen-pk-row">
+                            <span class="gen-pk-name"><?= htmlspecialchars($pname) ?></span>
+                            <select name="progkey_<?= $pid ?>_type" onchange="progKeyRefreshRow(<?= $pid ?>);">
+                                <?php foreach ($prog_key_types as $t_code => $t_label): ?>
+                                    <option value="<?= $t_code ?>" <?= ($pk_type === (string)$t_code) ? 'selected' : '' ?>><?= htmlspecialchars($t_label) ?> (<?= $t_code ?>)</option>
+                                <?php endforeach; ?>
+                                <?php if (!ctype_digit($pk_type) || !isset($prog_key_types[(int)$pk_type])): ?>
+                                    <option value="<?= htmlspecialchars($pk_type) ?>" selected>Other (<?= htmlspecialchars($pk_type) ?>)</option>
+                                <?php endif; ?>
+                            </select>
+                            <div class="gen-pk-slot">
+                                <select name="progkey_<?= $pid ?>_line" class="pk-line">
+                                    <?php for ($l = 0; $l <= 16; $l++): ?>
+                                        <option value="<?= $l ?>" <?= ($pk_line === (string)$l) ? 'selected' : '' ?>><?= ($l === 0) ? 'Auto / All (0)' : 'Line ' . $l ?></option>
+                                    <?php endfor; ?>
+                                </select>
+                                <select name="progkey_<?= $pid ?>_hist" class="pk-hist">
+                                    <option value="0" <?= ($pk_hist === '1') ? '' : 'selected' ?>>Local History</option>
+                                    <option value="1" <?= ($pk_hist === '1') ? 'selected' : '' ?>>Network CallLog</option>
+                                </select>
+                                <span class="pk-na">N/A</span>
+                            </div>
+                            <input type="text" class="pk-value" name="progkey_<?= $pid ?>_value" placeholder="Number / URL" value="<?= htmlspecialchars($formData["progkey_{$pid}_value"] ?? '') ?>">
+                            <input type="text" class="pk-label" name="progkey_<?= $pid ?>_label" placeholder="Label" value="<?= htmlspecialchars($formData["progkey_{$pid}_label"] ?? '') ?>">
+                            <input type="text" class="pk-ext" name="progkey_<?= $pid ?>_ext" placeholder="Extension" value="<?= htmlspecialchars($formData["progkey_{$pid}_ext"] ?? '') ?>">
+                        </div>
+                        <?php endforeach; ?>
+                        </div>
+                    </div>
+                </section></div>
+    <div class="epm-key-modal-foot">
+      <span class="epm-key-modal-note">Changes are included when you save the template.</span>
+      <button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal('keyModal_progkeys')">Close</button>
+    </div>
+  </div>
+</div>
 
             <br>
             <button type="submit" id="save_template_btn" name="save_template" class="gen-btn" style="background: #28a745;">Save Template to /tftpboot/templates/</button>
@@ -2420,3 +2995,344 @@ function toggleOvpnState(ext, mac, enable) {
         </form>
     </div>
 </div>
+
+<script>
+    // ---- Key boxes: shared plumbing ----------------------------------------
+    var progKeyModels = <?= json_encode($prog_key_models) ?>;
+    var progKeyModelDefaults = <?= json_encode($prog_key_model_defaults) ?>;
+    var progKeyTypeFields = <?= json_encode($prog_key_type_fields) ?>;
+    var progKeyIds = <?= json_encode(array_keys($prog_key_names)) ?>;
+    var progKeyMaxLines = 16;
+    var progKeyPrevModel = null;
+
+    function keyField(name) {
+        return document.querySelector('[name="' + name + '"]');
+    }
+
+    document.addEventListener('keydown', function (e) {
+        // Enter inside a key box must not submit the whole template form.
+        if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' && e.target.type === 'text' && e.target.closest && e.target.closest('.epm-box')) {
+            e.preventDefault();
+        }
+    });
+
+    ['input', 'change'].forEach(function (evt) {
+        document.addEventListener(evt, function (e) {
+            if (!e.target || !e.target.closest) { return; }
+            var pkRow = e.target.closest('.gen-pk-row');
+            if (pkRow) { pkRow.dataset.touched = '1'; }
+            if (e.target.closest('#box_linekeys, #box_memkeys, #box_progkeys')) { refreshKeySummaries(); }
+        });
+    });
+
+    // ---- Programmable keys ---------------------------------------------------
+    function progKeyType(id) {
+        var s = keyField('progkey_' + id + '_type');
+        var n = s ? parseInt(s.value, 10) : 0;
+        return isNaN(n) ? 0 : n;
+    }
+
+    function progKeyHas(type, field) {
+        var a = progKeyTypeFields[type];
+        return !!a && a.indexOf(field) > -1;
+    }
+
+    function progKeyDefs(model) {
+        return progKeyModelDefaults[model] || progKeyModelDefaults['manual'];
+    }
+
+    function progKeySetEnabled(input, on) {
+        if (!input) { return; }
+        input.readOnly = !on;
+        input.tabIndex = on ? 0 : -1;
+        input.classList.toggle('gen-pk-off', !on);
+    }
+
+    function progKeyBuildLineOptions(sel, type) {
+        var cur = sel.value || '1';
+        var allowZero = (type === 2 || type === 13 || type === 14);
+        sel.innerHTML = '';
+        if (allowZero) {
+            var z = document.createElement('option');
+            z.value = '0';
+            z.textContent = (type === 2) ? 'All lines (0)' : 'Auto (0)';
+            sel.appendChild(z);
+        }
+        for (var l = 1; l <= progKeyMaxLines; l++) {
+            var o = document.createElement('option');
+            o.value = String(l);
+            o.textContent = 'Line ' + l;
+            sel.appendChild(o);
+        }
+        sel.value = cur;
+        if (sel.selectedIndex < 0) { sel.value = '1'; }
+    }
+
+    function progKeyRefreshRow(id) {
+        var row = document.getElementById('progkey_row_' + id);
+        if (!row) { return; }
+        var t = progKeyType(id);
+        var line = row.querySelector('.pk-line');
+        var hist = row.querySelector('.pk-hist');
+        var na = row.querySelector('.pk-na');
+        var showLine = progKeyHas(t, 'line');
+        var showHist = progKeyHas(t, 'hist');
+        line.style.display = showLine ? '' : 'none';
+        hist.style.display = showHist ? '' : 'none';
+        na.style.display = (showLine || showHist) ? 'none' : '';
+        if (showLine) { progKeyBuildLineOptions(line, t); }
+        progKeySetEnabled(row.querySelector('.pk-value'), progKeyHas(t, 'value'));
+        progKeySetEnabled(row.querySelector('.pk-ext'), progKeyHas(t, 'ext'));
+        progKeySetEnabled(row.querySelector('.pk-label'), id <= 4 && t !== 0);
+        refreshKeySummaries();
+    }
+
+    function progKeyRefreshAll() {
+        progKeyIds.forEach(progKeyRefreshRow);
+    }
+
+    // Same test the server uses to decide whether a key is written to the template.
+    function progKeyIsCustom(id, defs) {
+        var t = progKeyType(id);
+        if (t !== defs[id]) { return true; }
+        var row = document.getElementById('progkey_row_' + id);
+        if (!row) { return false; }
+        var val = function (sel) { var e = row.querySelector(sel); return e ? e.value.trim() : ''; };
+        if (progKeyHas(t, 'value') && val('.pk-value') !== '') { return true; }
+        if (progKeyHas(t, 'ext') && val('.pk-ext') !== '') { return true; }
+        if (id <= 4 && t !== 0 && val('.pk-label') !== '') { return true; }
+        if (progKeyHas(t, 'line') && val('.pk-line') !== '1') { return true; }
+        if (progKeyHas(t, 'hist') && val('.pk-hist') !== '0') { return true; }
+        return false;
+    }
+
+    function progKeyOnModelChange(model, lines) {
+        progKeyMaxLines = (model === 'manual' || !lines) ? 16 : lines;
+        var firstCall = (progKeyPrevModel === null);
+        var newDefs = progKeyDefs(model);
+        var ids = progKeyModels[model] || progKeyModels['manual'];
+
+        progKeyIds.forEach(function (id) {
+            var row = document.getElementById('progkey_row_' + id);
+            if (!row) { return; }
+            if (firstCall) {
+                // Whatever the server rendered that differs from the factory layout counts as edited.
+                row.dataset.touched = progKeyIsCustom(id, newDefs) ? '1' : '';
+            } else if (!row.dataset.touched) {
+                // Keys nobody edited follow the new model's factory layout.
+                var sel = keyField('progkey_' + id + '_type');
+                if (sel) { sel.value = String(newDefs[id]); }
+            }
+            row.style.display = (ids.indexOf(id) > -1) ? '' : 'none';
+        });
+        progKeyPrevModel = model;
+        progKeyRefreshAll();
+
+        var modelSel = document.getElementById('select_phone_model');
+        var label = (modelSel && modelSel.selectedIndex >= 0) ? modelSel.options[modelSel.selectedIndex].text : model;
+        var note = document.getElementById('progkey_model_note');
+        if (note) {
+            note.textContent = (model === 'manual')
+                ? 'Manual / Generic: every key is listed. Pick a phone model to show only the keys it has.'
+                : ids.length + ' programmable keys on ' + label + '.';
+        }
+        refreshKeySummaries();
+    }
+
+    function progKeyResetDefaults() {
+        var modelSel = document.getElementById('select_phone_model');
+        var model = modelSel ? modelSel.value : 'manual';
+        var defs = progKeyDefs(model);
+        var ids = progKeyModels[model] || progKeyModels['manual'];
+        ids.forEach(function (id) {
+            var row = document.getElementById('progkey_row_' + id);
+            if (!row) { return; }
+            keyField('progkey_' + id + '_type').value = String(defs[id]);
+            row.querySelector('.pk-line').value = '1';
+            row.querySelector('.pk-hist').value = '0';
+            row.querySelector('.pk-value').value = '';
+            row.querySelector('.pk-label').value = '';
+            row.querySelector('.pk-ext').value = '';
+            row.dataset.touched = '';
+        });
+        progKeyRefreshAll();
+    }
+
+
+
+    function openEpmKeyModal(id) {
+        var modal = document.getElementById(id);
+        if (!modal) return;
+        modal.classList.add('is-open');
+        modal.setAttribute('aria-hidden','false');
+        document.body.classList.add('epm-key-modal-open');
+        var closeBtn = modal.querySelector('.epm-key-modal-x');
+        if (closeBtn) closeBtn.focus();
+    }
+    function closeEpmKeyModal(id) {
+        var modal = document.getElementById(id);
+        if (!modal) return;
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden','true');
+        if (!document.querySelector('.epm-key-modal.is-open')) {
+            document.body.classList.remove('epm-key-modal-open');
+        }
+    }
+    document.addEventListener('click', function(e) {
+        if (e.target.classList && e.target.classList.contains('epm-key-modal')) {
+            closeEpmKeyModal(e.target.id);
+        }
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            var opened = document.querySelector('.epm-key-modal.is-open');
+            if (opened) closeEpmKeyModal(opened.id);
+        }
+    });
+
+    // ---- Template tab dashboard: drag to reorder, half/full width, collapse ------------
+    (function () {
+        var STORE = 'epm_dash_layout_v4';
+        var dash, defaults = null, dragged = null;
+
+        function readLayout() {
+            try { return JSON.parse(localStorage.getItem(STORE)) || {}; } catch (e) { return {}; }
+        }
+        function boxes() { return Array.prototype.slice.call(dash.querySelectorAll(':scope > .epm-box')); }
+        function persist() {
+            var st = { order: [], span: {}, fold: {} };
+            boxes().forEach(function (b) {
+                var id = b.dataset.box;
+                st.order.push(id);
+                st.span[id] = b.dataset.span;
+                st.fold[id] = b.classList.contains('epm-folded');
+            });
+            try { localStorage.setItem(STORE, JSON.stringify(st)); } catch (e) {}
+        }
+        function apply(st) {
+            if (st.order) {
+                st.order.forEach(function (id) {
+                    var b = dash.querySelector(':scope > [data-box="' + id + '"]');
+                    if (b) { dash.appendChild(b); }
+                });
+            }
+            boxes().forEach(function (b) {
+                var id = b.dataset.box;
+                if (st.span && st.span[id]) { b.dataset.span = st.span[id]; }
+                b.classList.toggle('epm-folded', !!(st.fold && st.fold[id]));
+            });
+        }
+
+        window.epmDashReset = function () {
+            if (!dash || !defaults) { return; }
+            try { localStorage.removeItem(STORE); } catch (e) {}
+            apply(defaults);
+        };
+
+        function init() {
+            dash = document.getElementById('epm_dash');
+            if (!dash) { return; }
+            defaults = { order: [], span: {}, fold: {} };
+            boxes().forEach(function (b) {
+                defaults.order.push(b.dataset.box);
+                defaults.span[b.dataset.box] = b.dataset.span;
+                defaults.fold[b.dataset.box] = false;
+            });
+            apply(readLayout());
+
+            dash.addEventListener('click', function (e) {
+                var t = e.target.closest ? e.target.closest('.epm-tool') : null;
+                if (!t) { return; }
+                var box = t.closest('.epm-box');
+                if (t.dataset.act === 'span') { box.dataset.span = (box.dataset.span === '2') ? '1' : '2'; }
+                if (t.dataset.act === 'fold') { box.classList.toggle('epm-folded'); }
+                persist();
+            });
+
+            // Only start a drag from the grip, so text fields and audio players keep working normally.
+            dash.addEventListener('mousedown', function (e) {
+                var g = e.target.closest ? e.target.closest('.epm-grip') : null;
+                if (g) { g.closest('.epm-box').setAttribute('draggable', 'true'); }
+            });
+            document.addEventListener('mouseup', function () {
+                boxes().forEach(function (b) { b.removeAttribute('draggable'); });
+            });
+            dash.addEventListener('dragstart', function (e) {
+                var b = e.target;
+                if (!b || !b.classList || !b.classList.contains('epm-box') || b.getAttribute('draggable') !== 'true') { return; }
+                dragged = b;
+                b.classList.add('epm-dragging');
+                if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', b.dataset.box); }
+            });
+            dash.addEventListener('dragover', function (e) {
+                if (!dragged) { return; }
+                e.preventDefault();
+                var t = e.target.closest ? e.target.closest('.epm-box') : null;
+                if (!t || t === dragged) { return; }
+                var r = t.getBoundingClientRect();
+                var after = e.clientY > r.top + r.height / 2;
+                dash.insertBefore(dragged, after ? t.nextSibling : t);
+            });
+            dash.addEventListener('drop', function (e) { if (dragged) { e.preventDefault(); } });
+            dash.addEventListener('dragend', function () {
+                if (!dragged) { return; }
+                dragged.classList.remove('epm-dragging');
+                dragged.removeAttribute('draggable');
+                dragged = null;
+                persist();
+            });
+        }
+
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init); } else { init(); }
+    })();
+
+    // ---- Summary lines on the template tab ----------------------------------
+    function plural(n, word) {
+        return n + ' ' + word + (n === 1 ? '' : 's');
+    }
+
+    function refreshKeySummaries() {
+        var el, n, cfg, i;
+
+        el = document.getElementById('summary_linekeys');
+        var lc = document.getElementById('select_linekey_count');
+        if (el && lc) {
+            n = parseInt(lc.value, 10) || 0;
+            cfg = 0;
+            for (i = 1; i <= n; i++) {
+                var lv = keyField('linekey_' + i + '_value');
+                var ll = keyField('linekey_' + i + '_label');
+                if ((lv && lv.value.trim() !== '') || (ll && ll.value.trim() !== '')) { cfg++; }
+            }
+            el.textContent = plural(n, 'slot') + ', ' + cfg + ' set';
+        }
+
+        el = document.getElementById('summary_memkeys');
+        var mc = document.getElementById('select_memkey_count');
+        if (el && mc) {
+            n = parseInt(mc.value, 10) || 0;
+            if (n === 0) {
+                el.textContent = 'No slots on this model (add an expansion module)';
+            } else {
+                cfg = 0;
+                for (i = 1; i <= n; i++) {
+                    var mv = keyField('memkey_' + i + '_value');
+                    if (mv && mv.value.trim() !== '') { cfg++; }
+                }
+                var mb = Math.min(memKeyBase(), n);
+                el.textContent = plural(n, 'slot') + (mb > 0 ? ' (' + mb + ' built-in)' : '') + ', ' + cfg + ' set';
+            }
+        }
+
+        el = document.getElementById('summary_progkeys');
+        var modelSel = document.getElementById('select_phone_model');
+        if (el && modelSel) {
+            var model = modelSel.value;
+            var ids = progKeyModels[model] || progKeyModels['manual'];
+            var defs = progKeyDefs(model);
+            var changed = 0;
+            ids.forEach(function (id) { if (progKeyIsCustom(id, defs)) { changed++; } });
+            el.textContent = plural(ids.length, 'key') + ', ' + changed + ' changed from default';
+        }
+    }
+</script>

@@ -10,40 +10,7 @@ On the Global Settings tab, it should automatically fill in your server ip or FQ
 
 On the template manager tab, it will automatically pull the SIP port from what's on the sip settings UDP listening port.  Clicking your phone model number should auto expand the  Line/Memory keys for that model phone.  Line key1  is greyed out because that is reserved for the Extension number.  The pickup field can be filled in but if it's left empty it fills ** on saving the template. Ringtones and Logo/Wallpaper will get saved in /var/www/html/PhoneSettings/(logo or ringtones)/.  This module will not resize or convert images ~~or audio to make them compatible with the phones~~. It will convert wav/mp3 ringtone audio and allow you to trim the size provided your pbx has ffmpeg installed.  You can add custom settings that aren't listed in the page in the field labeled Template Custom Key / Value Additions. 
 
-The device manager tab has a scan tool that will scan your xxx.xxx.xxx.xxx/24 subnet (ip can be manually changed if searching another subnet, not working through vpn) for available Yealink MAC addresses and their IP's and you can add them and the template on that page. You can also manually add the MAC if you if a specific phone is not found or you're connecting through vpn. 
+The device manager tab has a scan tool that will scan your xxx.xxx.xxx.xxx/24 subnet (ip can be manually changed if searching another subnet, ~~not working through vpn~~ working with my OpenVPN Manager Module https://github.com/CalNu/FPBX_OVPN_MGR/releases/tag/FPBX_OVPN_MGR) for available Yealink MAC addresses and their IP's and you can add them and the template on that page. You can also manually add the MAC if you if a specific phone is not found or you're connecting through vpn. 
 
 All MAC.cfg files, y0000000000XX.cfg, and templates are saved to the /tftpboot/ folder.  These can be browsed by going to https://PBX.IP/tftpboot and https://PBX.IP/PhoneSettings. If the pbx is set to forward http to https, the http port has been shifted to :83.
 
-1.0.0.9 updates: 
-
-•Added upload/download template file. Save location moved to /tftpboot/templates/
-
-•Added ringtone conversion to convert mp3 and wav to 8khz, pcmu, mono to match yealink requirements. This requires ffmpeg installed. Most freepbx has it preinstalled. The module will install it for you if not, but this must be done at the command line "fwconsole ma install yealink_epm" or "fwconsole ma downloadinstall https://github.com/hgolbar/FPBX_Yealink_EMP/archive/refs/heads/1.0.0.9.zip"
-
-•Added ability to trim audio files.
-
-•Added download function for ringtones
-
-•Added flush command when deleting ringtones in use may any mac.cfg files. This pushes a mac.cfg that deletes all ringtones and reinstalls checked ones.  Once the template is saved, it rebuilds the mac.cfg to remove the delete command so it doesn't keep deleting/reinstalling the ringtone on each reboot.
-
-1.0.10 Updates:
-
-• Added integration with my openvpn module https://github.com/CalNu/FPBX_OVPN_MGR
-
-• Multiple bug fixes.
-
-1.0.3c Update:
-
-• Added local signature and ability to self sign module to get rid of the unsigned module nag.
-
-• Security hardened some folders in case server is internet facing while allowing /tftpboot/ and /PhoneSettings/ to be browsable from within the intranet.
-
-• Fixed some interopeabiliy between Freepbx 16 and 17
-
-1.0.4 Update:
-
-• Large code rewrite to create the VPN tar using my OpenVPN manager.
-
-• Added y-configs for all the newer phone models.
-
-• Adjusted line keys to match the selected model number.

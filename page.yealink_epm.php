@@ -15,9 +15,14 @@ if (!defined('FREEPBX_IS_AUTH')) {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.js"></script>
 
 <style>
+
+    .shadow-box { border: none; background: #fff; outline: none; box-shadow: 2px 2px 5px #307847; }
+    .sans-font { font-family: Arial, Helvetica, san-sarif; }
+    .box-bg { background: #f7f7f7; }
+
     .gen-container { background: #fff; padding: 20px; border-radius: 6px; overflow: visible; }
     .gen-container label { font-weight: bold; display: block; margin-top: 10px; }
-    .gen-container input[type="text"], .gen-container select, .gen-container input[type="file"] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    .gen-container input[type="text"], .gen-container select, .gen-container input[type="file"] { padding: 12px 14px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
     .gen-full-width { width: 100%; }
     .gen-key-row { display: flex; gap: 10px; margin-top: 5px; }
     .gen-key-row input, .gen-key-row div, .gen-key-row select { flex: 1; }
@@ -112,26 +117,41 @@ if (!defined('FREEPBX_IS_AUTH')) {
     .gen-kh span { flex: 1; }
     .gen-kh .gen-key-num { flex: none; }
     .gen-key-pages { flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-    .gen-key-page { padding: 5px 10px; border: 1px solid #ced4da; border-radius: 4px; background: #fff; cursor: pointer; font-size: 13px; }
-    .gen-key-page.active { background: #007bff; border-color: #007bff; color: #fff; }
+    .gen-key-page { padding: 5px 10px; border: 0px solid #ced4da; border-radius: 6px 6px 0 0; background: #3e694c; color: #fff; cursor: pointer; font-size: 13px; }
+    .gen-key-page.active { background: #d3e8da; border-color: #237a4b; color: #3e694c; font-weight: 600; }
+    .gen-key-sortable { cursor: pointer; user-select: none; }
+    .gen-key-sortable:hover { color: #237a4b; }
+    .gen-key-sortable i.fa { margin-left: 3px; }
+    .gen-key-sortable .sort-caret { margin-left: 3px; display: inline-block; font-size: 11px; }
+    .gen-key-draggable { cursor: grab; user-select: none; }
+    .gen-key-draggable:active { cursor: grabbing; }
+    .gen-key-row.gen-key-dragging { opacity: 0.4; }
+    .gen-key-row.gen-key-drop-target { outline: 2px dashed #307847; outline-offset: -2px; }
     .gen-key-empty { color: #666; margin-top: 12px; }
     .gen-pk-name { font-size: 13px; font-weight: bold; }
-    .gen-pk-row, .gen-pk-head { display: grid; grid-template-columns: 84px 1.5fr 1fr 1.2fr 1.2fr 1fr; gap: 10px; align-items: center; }
+    .gen-pk-row, .gen-pk-head { display: grid; grid-template-columns: 84px 1.5fr 1fr 1.2fr 1.2fr; gap: 10px; align-items: center; }
     .gen-lk-row, .gen-lk-head { display: grid; grid-template-columns: 28px 1.1fr 1.5fr 1.5fr 1.5fr 1fr; gap: 10px; align-items: center; }
-    .gen-mk-row, .gen-mk-head { display: grid; grid-template-columns: 28px 1.6fr 1fr; gap: 10px; align-items: center; }
+    .gen-mk-row, .gen-mk-head { display: grid; grid-template-columns: 28px 1.1fr 1.5fr 1.5fr 1.5fr 1fr; gap: 10px; align-items: center; }
     .gen-pk-row > *, .gen-pk-head > *, .gen-lk-row > *, .gen-lk-head > *, .gen-mk-row > *, .gen-mk-head > * { min-width: 0; }
-    .gen-pk-row input, .gen-pk-row select, .gen-lk-row input, .gen-lk-row select, .gen-mk-row input { width: 100%; box-sizing: border-box; }
-    .pk-na { display: block; padding: 8px; border: 1px solid #dee2e6; border-radius: 4px; background: #e9ecef; color: #888; font-size: 13px; box-sizing: border-box; }
+    .gen-pk-row input, .gen-pk-row select, .gen-lk-row input, .gen-lk-row select, .gen-mk-row input, .gen-mk-row select { width: 100%; box-sizing: border-box; }
+    .pk-na { display: block; padding: 8px; border: 0px solid #dee2e6; border-radius: 4px; background: transparent; color: #888; font-size: 13px; box-sizing: border-box; }
     .gen-container input.gen-pk-off { background: #e9ecef; color: #888; }
 
     /* ---- Template tab dashboard (movable boxes) ---- */
     .epm-dash-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
     .epm-dash-hint { color: #777; font-size: 12px; }
     .epm-dash-reset { margin: 0 !important; padding: 4px 10px !important; font-size: 12px; background: #6c757d !important; white-space: nowrap; }
-    .epm-dash { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; margin-top: 12px; }
-    .epm-box { margin-bottom: 0; }
-    .epm-box[data-span="2"] { grid-column: 1 / -1; }
-    .epm-box { border: 1px solid #ced4da; border-radius: 6px; background: #fff; min-width: 0; box-shadow: 0 1px 2px rgba(0,0,0,.05); break-inside: avoid; margin-bottom: 0; }
+    /* Two explicit, independently-ordered columns. Boxes are dragged directly into
+       column 1 or column 2 and stack immediately under whatever is already in that
+       column, with no need to line up with the other column. A box toggled to full
+       width becomes its own full-bleed band and splits the columns above/below it. */
+    .epm-dash { margin-top: 12px; }
+    .epm-band { display: flex; align-items: flex-start; gap: 20px; }
+    .epm-band + .epm-band { margin-top: 20px; }
+    .epm-band.epm-band-full { display: block; }
+    .epm-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+    .epm-col.epm-col-drop-target { outline: 2px dashed #007bff; outline-offset: 4px; border-radius: 6px; }
+    .epm-box { border: 1px solid #ced4da; border-radius: 6px; background: #fff; min-width: 0; box-shadow: 0 1px 2px rgba(0,0,0,.05); margin-bottom: 0; overflow: hidden; }
     .epm-box.epm-dragging { opacity: .45; outline: 2px dashed #007bff; }
     .epm-box-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: #f1f3f5; border-bottom: 1px solid #ced4da; border-radius: 6px 6px 0 0; min-width: 0; }
     .epm-folded .epm-box-head { border-bottom: none; border-radius: 6px; }
@@ -154,9 +174,9 @@ if (!defined('FREEPBX_IS_AUTH')) {
     .epm-scroll .gen-kh { position: sticky; top: 0; z-index: 1; background: #fff; margin-top: 0; padding: 2px 0; }
     .epm-box .gen-key-row { margin-top: 3px; }
     .epm-box .gen-lk-row, .epm-box .gen-lk-head { gap: 6px; grid-template-columns: 24px minmax(0, 1.05fr) minmax(0, 1.25fr) minmax(0, 1.25fr) minmax(0, .9fr) minmax(0, .9fr); }
-    .epm-box .gen-mk-row, .epm-box .gen-mk-head { gap: 6px; grid-template-columns: 24px minmax(0, 1.6fr) minmax(0, 1fr); }
-    .epm-box .gen-pk-row, .epm-box .gen-pk-head { gap: 6px; grid-template-columns: 78px minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.1fr) minmax(0, 1fr); }
-    .gen-container .epm-box input[type="text"], .gen-container .epm-box select { padding: 4px 6px; height: 28px; font-size: 12px; }
+    .epm-box .gen-mk-row, .epm-box .gen-mk-head { gap: 6px; grid-template-columns: 24px minmax(0, 1.05fr) minmax(0, 1.25fr) minmax(0, 1.25fr) minmax(0, .9fr) minmax(0, .9fr); }
+    .epm-box .gen-pk-row, .epm-box .gen-pk-head { gap: 6px; grid-template-columns: 78px minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.1fr); }
+    .gen-container .epm-box input[type="text"], .gen-container .epm-box select { padding: 10px 12px; height: auto; font-size: 13px; }
     .epm-box .pk-na { padding: 4px 6px; height: 28px; font-size: 12px; }
     .epm-box .gen-pk-name { font-size: 12px; }
     .epm-box .gen-kh { gap: 6px; font-size: 11px; }
@@ -194,12 +214,12 @@ if (!defined('FREEPBX_IS_AUTH')) {
         .epm-box .gen-pk-row > select[name$="_type"] { grid-column: 2 / 4; }
         .epm-box .gen-pk-row > .gen-pk-slot { grid-column: 4 / 6; }
         .epm-box .gen-pk-row > .pk-value { grid-column: 2 / 4; }
-        .epm-box .gen-pk-row > .pk-label { grid-column: 4; }
-        .epm-box .gen-pk-row > .pk-ext { grid-column: 5; }
+        .epm-box .gen-pk-row > .pk-label { grid-column: 4 / 6; }
     }
     @media (max-width: 1000px) {
-        .epm-dash { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-        .epm-box[data-span="2"] { grid-column: auto; }
+        .epm-band { flex-direction: column; gap: 16px; }
+        .epm-band + .epm-band { margin-top: 16px; }
+        .epm-col { gap: 16px; }
     }
 
     .scan-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
@@ -215,7 +235,7 @@ if (!defined('FREEPBX_IS_AUTH')) {
     .oss-btn-icon.online { color: #28a745; }
     .oss-btn-icon.offline { color: #dc3545; }
 
-    .ringtone-card { border: 1px solid #ccc; border-radius: 6px; padding: 12px; background: #FCFCFC; margin-top: 10px; }
+    .ringtone-card { border: 1px solid #ccc; border-radius: 6px; padding: 12px; background: #f7f7f7; margin-top: 10px; }
     .ringtone-list-container { border: 1px solid #e0e0e0; background: #fff; border-radius: 4px; padding: 4px 10px; margin-top: 8px; }
     
     .ringtone-grid-item { 
@@ -274,6 +294,10 @@ if (!defined('FREEPBX_IS_AUTH')) {
         width: 16px;
         height: 16px;
         stroke: currentColor;
+    }
+    .action-icon-btn.loop-icon-btn.active {
+        color: #007bff;
+        background-color: #e7f1ff;
     }
     
     .upload-controls-col {
@@ -457,13 +481,13 @@ if (!defined('FREEPBX_IS_AUTH')) {
     .epm-box-title, .epm-box-head { color: #155b3b !important; }
     .gen-tab-btn.active { background: #237a4b !important; border-color: #237a4b !important; }
     .gen-tab-bar, .gen-section-title { border-bottom-color: #65a783 !important; }
-    .epm-key-overview-row { background: #FCFCFC !important; border-color: #b8d8c3 !important; }
+    .epm-key-overview-row { background: #F7F7F7 !important; border-color: #b8d8c3 !important; }
     .epm-key-summary, .spec-note { background: #e4f2e8 !important; border-left-color: #48a878 !important; color: #155b3b !important; }
     .epm-key-edit { background: #48a878 !important; border-color: #348e62 !important; color: #fff !important; }
     .epm-key-edit:hover { background: #348e62 !important; border-color: #28784f !important; }
     .epm-key-modal-head, .epm-key-modal-foot { background: ##EEF7F1 !important; border-color: #65a783 !important; }
     .epm-key-modal-dialog { border-color: #65a783 !important; }
-    .ringtone-card, .oss-action-card { background: #FCFCFC !important; border-color: #b8d8c3 !important; }
+    .ringtone-card, .oss-action-card { background: #F7F7F7 !important; border-color: #b8d8c3 !important; }
     .ringtone-list-container { border-color: #c7e0cf !important; }
     .ringtone-size-badge { background: #e1eee5 !important; color: #285d3f !important; }
     .oss-table th, .scan-table th { background: #dcefe2 !important; }
@@ -513,7 +537,7 @@ if (!defined('FREEPBX_IS_AUTH')) {
 <script>
 function toggleOvpnState(ext, mac, enable) {
     if (!ext) {
-        alert("Please assign an extension to this device first.");
+        epmAlert("Please assign an extension to this device first.");
         document.getElementById('vpn_toggle_' + mac).checked = !enable;
         return;
     }
@@ -542,7 +566,7 @@ function toggleOvpnState(ext, mac, enable) {
         if (timer) clearTimeout(timer);
         toggleElem.disabled = false;
         if (data.status !== 'success') {
-            alert(data.message || 'Error updating VPN state.');
+            epmAlert(data.message || 'Error updating VPN state.');
             toggleElem.checked = !enable;
         } else {
             if (statusLight) {
@@ -563,9 +587,9 @@ function toggleOvpnState(ext, mac, enable) {
         toggleElem.checked = !enable;
         console.error('toggleOvpnState failed:', err);
         if (err && err.name === 'AbortError') {
-            alert('The server did not answer within 60 seconds, so the switch was re-enabled. The change may still be running - reload the page to see the current state.');
+            epmAlert('The server did not answer within 60 seconds, so the switch was re-enabled. The change may still be running - reload the page to see the current state.');
         } else {
-            alert('Communication error with FreePBX backend.');
+            epmAlert('Communication error with FreePBX backend.');
         }
     });
 }
@@ -632,7 +656,7 @@ function toggleOvpnState(ext, mac, enable) {
         var sel = document.getElementById('select_template_file');
         var val = sel ? sel.value : '';
         if (!val) {
-            alert("Please select a template to download first.");
+            epmAlert("Please select a template to download first.");
             return;
         }
         window.location.href = window.location.pathname + '?display=yealink_epm&action=download_template&file=' + encodeURIComponent(val);
@@ -671,11 +695,13 @@ function toggleOvpnState(ext, mac, enable) {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
-    function toggleAudioLoop(playerId, shouldLoop) {
+    function toggleAudioLoopBtn(btn, playerId) {
         var player = document.getElementById(playerId);
-        if (player) {
-            player.loop = shouldLoop;
-        }
+        if (!player) { return; }
+        var shouldLoop = !player.loop;
+        player.loop = shouldLoop;
+        btn.classList.toggle('active', shouldLoop);
+        btn.setAttribute('aria-pressed', shouldLoop ? 'true' : 'false');
     }
 
     function editUploadedRingtone(filename) {
@@ -690,7 +716,7 @@ function toggleOvpnState(ext, mac, enable) {
                 openAudioTrimmerModal(fileObj);
             })
             .catch(function(err) {
-                alert("Failed to fetch ringtone for editing.");
+                epmAlert("Failed to fetch ringtone for editing.");
             });
     }
 
@@ -730,12 +756,15 @@ function toggleOvpnState(ext, mac, enable) {
                     <source src="${streamUrl}" type="audio/mpeg">
                 </audio>
             </div>
-            <div style="display:flex; align-items:center; gap:4px;">
-                <label style="font-size:11px; font-weight:600; color:#555; cursor:pointer; margin:0; display:inline-flex; align-items:center; gap:3px;">
-                    <input type="checkbox" onchange="toggleAudioLoop('audio_player_${cleanId}', this.checked)"> Loop
-                </label>
-            </div>
             <div style="display:flex; align-items:center; gap:2px;">
+                <button type="button" class="action-icon-btn loop-icon-btn" title="Loop ${filename}" aria-pressed="false" onclick="toggleAudioLoopBtn(this, 'audio_player_${cleanId}')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="17 1 21 5 17 9"></polyline>
+                        <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+                        <polyline points="7 23 3 19 7 15"></polyline>
+                        <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+                    </svg>
+                </button>
                 <button type="button" class="action-icon-btn" title="Trim / Edit ${filename}" onclick="editUploadedRingtone('${filename}')">
                     <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="6" cy="6" r="3"></circle>
@@ -886,13 +915,13 @@ function toggleOvpnState(ext, mac, enable) {
                     textarea.style.display = 'none';
                 }
             } else {
-                alert('Error cropping audio: ' + data.message);
+                epmAlert('Error cropping audio: ' + data.message);
                 uploadBtn.disabled = false;
                 uploadBtn.innerText = 'Upload Ringtones';
             }
         })
         .catch(err => {
-            alert('Error processing audio request.');
+            epmAlert('Error processing audio request.');
             uploadBtn.disabled = false;
             uploadBtn.innerText = 'Upload Ringtones';
         });
@@ -905,7 +934,7 @@ function toggleOvpnState(ext, mac, enable) {
         var files = fileInput.files;
         
         if (!files || files.length === 0) {
-            alert('Please select files first using the Browse button.');
+            epmAlert('Please select files first using the Browse button.');
             return;
         }
 
@@ -961,13 +990,13 @@ function toggleOvpnState(ext, mac, enable) {
                     
                     processNext();
                 } else {
-                    alert('Upload failed for ' + file.name + ': ' + data.message);
+                    epmAlert('Upload failed for ' + file.name + ': ' + data.message);
                     uploadBtn.disabled = false;
                     uploadBtn.innerText = 'Upload Ringtones';
                 }
             })
             .catch(function(err) {
-                alert('Error uploading ' + file.name + '.');
+                epmAlert('Error uploading ' + file.name + '.');
                 uploadBtn.disabled = false;
                 uploadBtn.innerText = 'Upload Ringtones';
             });
@@ -976,13 +1005,141 @@ function toggleOvpnState(ext, mac, enable) {
         processNext();
     }
 
+    function updateExpWallpaperFileLabel(input) {
+        var label = document.getElementById('exp_wallpaper_file_label');
+        if (label) {
+            label.textContent = (input.files && input.files.length) ? input.files[0].name : 'No file selected';
+        }
+    }
+
+    // Uploads the selected expansion-module wallpaper image immediately (before Save
+    // Template is clicked), so it shows up in the "Existing file" dropdown right away.
+    function uploadExpWallpaperAsync(event) {
+        if (event) event.preventDefault();
+
+        var fileInput = document.getElementById('exp_wallpaper_file_input');
+        var files = fileInput ? fileInput.files : null;
+
+        if (!files || files.length === 0) {
+            epmAlert('Please select a wallpaper image first using Browse Files.');
+            return;
+        }
+
+        var uploadBtn = document.getElementById('exp_wallpaper_upload_btn');
+        uploadBtn.disabled = true;
+        uploadBtn.innerText = 'Uploading...';
+
+        var formDataWp = new FormData();
+        formDataWp.append('single_wallpaper_ajax', '1');
+        formDataWp.append('wallpaper_file', files[0]);
+
+        fetch(window.location.href, {
+            method: 'POST',
+            body: formDataWp
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (data.status === 'success') {
+                var sel = document.getElementById('select_exp_wallpaper_file');
+                if (sel) {
+                    var exists = false;
+                    for (var i = 0; i < sel.options.length; i++) {
+                        if (sel.options[i].value === data.filename) { exists = true; break; }
+                    }
+                    if (!exists) {
+                        var opt = document.createElement('option');
+                        opt.value = data.filename;
+                        opt.textContent = data.filename;
+                        sel.appendChild(opt);
+                    }
+                    sel.value = data.filename;
+                }
+                fileInput.value = '';
+                updateExpWallpaperFileLabel(fileInput);
+                uploadBtn.innerText = 'Upload Complete!';
+                setTimeout(function () {
+                    uploadBtn.disabled = false;
+                    uploadBtn.innerText = 'Upload';
+                }, 1500);
+            } else {
+                epmAlert('Upload failed: ' + data.message);
+                uploadBtn.disabled = false;
+                uploadBtn.innerText = 'Upload';
+            }
+        })
+        .catch(function () {
+            epmAlert('Error uploading wallpaper image.');
+            uploadBtn.disabled = false;
+            uploadBtn.innerText = 'Upload';
+        });
+    }
+
+    // ---------------------------------------------------------------------
+    // Generic in-page replacements for window.alert() / window.confirm().
+    // Native browser dialogs can be permanently silenced by the visitor via
+    // "Prevent this page from creating additional dialogs", which then makes
+    // alert()/confirm() resolve instantly (as if OK/Cancel were pre-clicked)
+    // for the rest of the page's life. These custom modals can't be muted
+    // that way, so every alert()/confirm() in this file should route through
+    // epmAlert()/epmConfirm() instead of the native functions.
+    // ---------------------------------------------------------------------
+    var epmAlertCallback = null;
+
+    function epmAlert(message, callback) {
+        var modal = document.getElementById('epmAlertModal');
+        if (!modal) { window.alert(message); if (typeof callback === 'function') callback(); return; }
+        document.getElementById('epmAlertModalMessage').textContent = message;
+        epmAlertCallback = (typeof callback === 'function') ? callback : null;
+        modal.style.display = 'flex';
+        modal.setAttribute('aria-hidden', 'false');
+        var ok = document.getElementById('epmAlertModalOk');
+        if (ok) ok.focus();
+    }
+
+    function epmAlertOk() {
+        var modal = document.getElementById('epmAlertModal');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.setAttribute('aria-hidden', 'true');
+        }
+        var cb = epmAlertCallback;
+        epmAlertCallback = null;
+        if (cb) cb();
+    }
+
+    var epmConfirmCallback = null;
+
+    function epmConfirm(message, onConfirm, opts) {
+        var modal = document.getElementById('epmConfirmModal');
+        if (!modal) { if (window.confirm(message) && typeof onConfirm === 'function') onConfirm(); return; }
+        document.getElementById('epmConfirmModalMessage').textContent = message;
+        document.getElementById('epmConfirmModalTitle').textContent = (opts && opts.title) || 'Please confirm';
+        document.getElementById('epmConfirmModalOk').textContent = (opts && opts.okLabel) || 'OK';
+        epmConfirmCallback = (typeof onConfirm === 'function') ? onConfirm : null;
+        modal.style.display = 'flex';
+        modal.setAttribute('aria-hidden', 'false');
+        var cancel = document.getElementById('epmConfirmModalCancel');
+        if (cancel) cancel.focus();
+    }
+
+    function epmConfirmAnswer(result) {
+        var modal = document.getElementById('epmConfirmModal');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.setAttribute('aria-hidden', 'true');
+        }
+        var cb = epmConfirmCallback;
+        epmConfirmCallback = null;
+        if (result && cb) cb();
+    }
+
     var epmPendingDelete = null;
 
     // Use an in-page confirmation for ringtone/logo deletion. Unlike window.confirm(),
     // this cannot be suppressed by the browser's "don't allow this page to prompt again" setting.
     function confirmDeleteFile(filename, fileType) {
         if (!filename || filename === 'system') {
-            alert("Please select a valid file to delete.");
+            epmAlert("Please select a valid file to delete.");
             return false;
         }
 
@@ -1000,9 +1157,9 @@ function toggleOvpnState(ext, mac, enable) {
         }
 
         // Keep existing confirmation behavior for other file types.
-        if (confirm("Are you sure you want to permanently delete '" + filename + "' from the server?")) {
+        epmConfirm("Are you sure you want to permanently delete '" + filename + "' from the server?", function () {
             submitDeleteFile(filename, fileType);
-        }
+        }, { title: 'Confirm deletion', okLabel: 'Delete permanently' });
         return false;
     }
 
@@ -1035,8 +1192,102 @@ function toggleOvpnState(ext, mac, enable) {
         targetForm.submit();
     }
 
+    var epmPendingVpnDisable = null;
+
+    // Turning VPN ON is non-destructive - goes straight through. Turning it OFF
+    // revokes the phone's cert (see toggleOvpnState/revokeExtensionAndRestart),
+    // so gate that behind the same style of in-page confirmation as ringtone/logo
+    // deletion, and revert the switch if the user backs out.
+    function handleVpnToggleChange(checkbox, ext, mac) {
+        if (checkbox.checked) {
+            toggleOvpnState(ext, mac, true);
+            return;
+        }
+
+        epmPendingVpnDisable = { ext: ext, mac: mac };
+        var modal = document.getElementById('epmVpnDisableConfirmModal');
+        document.getElementById('epmVpnDisableConfirmExt').textContent = ext || '(unassigned)';
+        document.getElementById('epmVpnDisableConfirmMac').textContent = mac;
+        modal.style.display = 'flex';
+        modal.setAttribute('aria-hidden', 'false');
+        document.getElementById('epmVpnDisableConfirmCancel').focus();
+    }
+
+    function closeVpnDisableModal() {
+        var modal = document.getElementById('epmVpnDisableConfirmModal');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.setAttribute('aria-hidden', 'true');
+        }
+        if (epmPendingVpnDisable) {
+            var cb = document.getElementById('vpn_toggle_' + epmPendingVpnDisable.mac);
+            if (cb) cb.checked = true;
+        }
+        epmPendingVpnDisable = null;
+    }
+
+    function submitConfirmedVpnDisable() {
+        if (!epmPendingVpnDisable) return;
+        var pending = epmPendingVpnDisable;
+        var modal = document.getElementById('epmVpnDisableConfirmModal');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.setAttribute('aria-hidden', 'true');
+        }
+        epmPendingVpnDisable = null;
+        toggleOvpnState(pending.ext, pending.mac, false);
+    }
+
+    var epmPendingBulkDelete = false;
+
+    function confirmDeleteSelectedPhones() {
+        var checked = document.querySelectorAll('.phone_checkbox:checked');
+        if (checked.length === 0) {
+            epmAlert('Please select at least one phone to delete.');
+            return;
+        }
+
+        var macs = Array.prototype.map.call(checked, function (cb) { return cb.value; });
+        epmPendingBulkDelete = true;
+        var modal = document.getElementById('epmBulkDeleteConfirmModal');
+        document.getElementById('epmBulkDeleteConfirmCount').textContent =
+            macs.length + (macs.length === 1 ? ' phone' : ' phones');
+        document.getElementById('epmBulkDeleteConfirmList').textContent = macs.join(', ');
+        modal.style.display = 'flex';
+        modal.setAttribute('aria-hidden', 'false');
+        document.getElementById('epmBulkDeleteConfirmCancel').focus();
+    }
+
+    function closeBulkDeleteModal() {
+        var modal = document.getElementById('epmBulkDeleteConfirmModal');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.setAttribute('aria-hidden', 'true');
+        }
+        epmPendingBulkDelete = false;
+    }
+
+    function submitConfirmedBulkDelete() {
+        if (!epmPendingBulkDelete) return;
+        epmPendingBulkDelete = false;
+        var modal = document.getElementById('epmBulkDeleteConfirmModal');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.setAttribute('aria-hidden', 'true');
+        }
+        triggerDeviceAction('delete_selected');
+    }
+
     document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape' && epmPendingDelete) closeDeleteConfirmModal();
+        if (e.key === 'Escape') {
+            if (epmPendingDelete) closeDeleteConfirmModal();
+            if (epmPendingVpnDisable) closeVpnDisableModal();
+            if (epmPendingBulkDelete) closeBulkDeleteModal();
+            var alertModal = document.getElementById('epmAlertModal');
+            if (alertModal && alertModal.style.display !== 'none') epmAlertOk();
+            var confirmModal = document.getElementById('epmConfirmModal');
+            if (confirmModal && confirmModal.style.display !== 'none') epmConfirmAnswer(false);
+        }
     });
 
     function calculateTotalRingtonePayloadSize() {
@@ -1240,11 +1491,15 @@ function toggleOvpnState(ext, mac, enable) {
     }
 
     function confirmDeleteGlobalConfig() {
-        if (confirm("Are you sure you want to permanently delete Global Settings? This removes the y-config file for EVERY phone generation (y000000000000.cfg and all newer model-specific y-configs) from /tftpboot/.")) {
-            document.getElementById('target_filename').value = "y000000000000.cfg";
-            document.getElementById('target_file_type').value = "global";
-            document.getElementById('delete_file_form').submit();
-        }
+        epmConfirm(
+            "Are you sure you want to permanently delete Global Settings? This removes the y-config file for EVERY phone generation (y000000000000.cfg and all newer model-specific y-configs) from /tftpboot/.",
+            function () {
+                document.getElementById('target_filename').value = "y000000000000.cfg";
+                document.getElementById('target_file_type').value = "global";
+                document.getElementById('delete_file_form').submit();
+            },
+            { title: 'Confirm deletion', okLabel: 'Delete permanently' }
+        );
     }
 
     function updateDialnowVisibility(count) {
@@ -1271,6 +1526,7 @@ function toggleOvpnState(ext, mac, enable) {
     // Per-model key layout and expansion sizes come from PHP ($yealink_model_keys / $expansion_key_sizes).
     var epmModelSpecs = <?= json_encode($yealink_model_keys) ?>;
     var epmExpKeySize = <?= json_encode($expansion_key_sizes) ?>;
+    var epmExpWallpaperModels = <?= json_encode($expansion_wallpaper_models) ?>;
 
     function epmModelSpec(model) {
         return epmModelSpecs[model] || epmModelSpecs['manual'];
@@ -1428,6 +1684,13 @@ function toggleOvpnState(ext, mac, enable) {
 
     function handleExpSelect() {
         calculateTotalMemoryKeys();
+
+        var expModel = document.getElementById('select_exp_model');
+        var wpBtn = document.getElementById('btn_exp_wallpaper');
+        if (wpBtn) {
+            var showsWallpaper = !!expModel && epmExpWallpaperModels.indexOf(expModel.value) !== -1;
+            wpBtn.style.display = showsWallpaper ? '' : 'none';
+        }
     }
 
     function syncRingtoneOptions(cb, filename) {
@@ -1508,7 +1771,7 @@ function toggleOvpnState(ext, mac, enable) {
         var btn = document.getElementById('manual_add_btn');
 
         if (rawMac.length !== 12) {
-            alert('Please enter a valid 12-character MAC address.');
+            epmAlert('Please enter a valid 12-character MAC address.');
             return;
         }
 
@@ -1539,14 +1802,14 @@ function toggleOvpnState(ext, mac, enable) {
                 btn.style.background = '#6c757d';
                 setTimeout(() => { closeManualAddModal(); }, 600);
             } else {
-                alert(data.message || 'Error adding device.');
+                epmAlert(data.message || 'Error adding device.');
                 btn.disabled = false;
                 btn.innerText = 'Create Device Config';
                 btn.style.background = '#28a745';
             }
         })
         .catch(err => {
-            alert('Request failed.');
+            epmAlert('Request failed.');
             btn.disabled = false;
             btn.innerText = 'Create Device Config';
             btn.style.background = '#28a745';
@@ -1606,10 +1869,10 @@ function toggleOvpnState(ext, mac, enable) {
                         <td style="vertical-align:middle;">${dev.ip}${viaBadge}</td>
                         <td style="vertical-align:middle;"><b>${dev.mac}</b></td>
                         <td>
-                            <select id="scan_ext_${dev.mac}" style="padding:4px; max-width:180px;">${extOptions}</select>
+                            <select id="scan_ext_${dev.mac}" class="shadow-box sans-font" style="padding:4px; max-width:180px;">${extOptions}</select>
                         </td>
                         <td>
-                            <select id="scan_tpl_${dev.mac}" style="padding:4px;">${tplOptions}</select>
+                            <select id="scan_tpl_${dev.mac}" class="shadow-box sans-font" style="padding:4px;">${tplOptions}</select>
                         </td>
                         <td style="text-align:center; vertical-align:middle;">
                             <input type="checkbox" id="scan_provision_${dev.mac}" checked title="Push config & auto-provision phone immediately">
@@ -1662,7 +1925,7 @@ function toggleOvpnState(ext, mac, enable) {
                 btn.style.background = '#6c757d';
                 enforceUniqueExtensionSelections();
             } else {
-                alert(data.message || 'Error adding device.');
+                epmAlert(data.message || 'Error adding device.');
                 btn.disabled = false;
                 btn.innerText = 'Error! Try Again';
                 btn.style.background = '#dc3545';
@@ -1677,7 +1940,7 @@ function toggleOvpnState(ext, mac, enable) {
 
     function submitAddAllScannedDevices() {
         if (scannedDeviceMacs.length === 0) {
-            alert('No devices available to add.');
+            epmAlert('No devices available to add.');
             return;
         }
 
@@ -1817,11 +2080,91 @@ function toggleOvpnState(ext, mac, enable) {
     </div>
 </div>
 
+<!-- Same accessible confirmation pattern, for turning a phone's VPN off (revokes its cert) -->
+<div id="epmVpnDisableConfirmModal" class="gen-modal" role="dialog" aria-modal="true" aria-labelledby="epmVpnDisableConfirmTitle" aria-hidden="true"
+     style="display:none; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;"
+     onclick="if (event.target === this) closeVpnDisableModal();">
+    <div class="gen-modal-content epm-delete-confirm-card" style="width:460px; max-width:96vw; margin:0; padding:0; overflow:hidden; border:1px solid #a9cbb8; box-shadow:0 12px 36px rgba(0,0,0,.28);">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 18px; background:#dcefe3; border-bottom:1px solid #a9cbb8;">
+            <h3 id="epmVpnDisableConfirmTitle" style="margin:0; color:#155b3b; font-size:16px;">Turn off VPN</h3>
+            <button type="button" aria-label="Close confirmation" onclick="closeVpnDisableModal()" style="border:0; background:transparent; color:#426653; font-size:22px; line-height:1; cursor:pointer;">&times;</button>
+        </div>
+        <div style="padding:18px; color:#333;">
+            <p style="margin:0 0 10px;">Turn off OpenVPN for extension <strong id="epmVpnDisableConfirmExt"></strong> (<span id="epmVpnDisableConfirmMac" style="font-family:monospace;"></span>)?</p>
+            <p style="margin:12px 0 0; color:#8a4b08; font-size:12px;">This revokes the phone's VPN certificate and deletes its client package. It will need a newly issued certificate to reconnect.</p>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; background:#f7faf8; border-top:1px solid #e0e9e3;">
+            <button id="epmVpnDisableConfirmCancel" type="button" class="gen-btn" style="margin:0; background:#6c757d;" onclick="closeVpnDisableModal()">Cancel</button>
+            <button type="button" class="gen-btn-danger" style="margin:0; padding:9px 16px;" onclick="submitConfirmedVpnDisable()">Turn off VPN</button>
+        </div>
+    </div>
+</div>
+
+<!-- Same accessible confirmation pattern, for the "Delete Selected Phones" bulk action -->
+<div id="epmBulkDeleteConfirmModal" class="gen-modal" role="dialog" aria-modal="true" aria-labelledby="epmBulkDeleteConfirmTitle" aria-hidden="true"
+     style="display:none; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;"
+     onclick="if (event.target === this) closeBulkDeleteModal();">
+    <div class="gen-modal-content epm-delete-confirm-card" style="width:460px; max-width:96vw; margin:0; padding:0; overflow:hidden; border:1px solid #a9cbb8; box-shadow:0 12px 36px rgba(0,0,0,.28);">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 18px; background:#dcefe3; border-bottom:1px solid #a9cbb8;">
+            <h3 id="epmBulkDeleteConfirmTitle" style="margin:0; color:#155b3b; font-size:16px;">Confirm deletion</h3>
+            <button type="button" aria-label="Close confirmation" onclick="closeBulkDeleteModal()" style="border:0; background:transparent; color:#426653; font-size:22px; line-height:1; cursor:pointer;">&times;</button>
+        </div>
+        <div style="padding:18px; color:#333;">
+            <p style="margin:0 0 10px;">Permanently delete the configuration file for <strong id="epmBulkDeleteConfirmCount">0 phones</strong> from the server?</p>
+            <div id="epmBulkDeleteConfirmList" style="padding:9px 11px; background:#f1f7f3; border:1px solid #d2e5d9; border-radius:4px; overflow-wrap:anywhere; font-family:monospace; font-size:12px; max-height:120px; overflow-y:auto;"></div>
+            <p style="margin:12px 0 0; color:#8a4b08; font-size:12px;">This action cannot be undone.</p>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; background:#f7faf8; border-top:1px solid #e0e9e3;">
+            <button id="epmBulkDeleteConfirmCancel" type="button" class="gen-btn" style="margin:0; background:#6c757d;" onclick="closeBulkDeleteModal()">Cancel</button>
+            <button type="button" class="gen-btn-danger" style="margin:0; padding:9px 16px;" onclick="submitConfirmedBulkDelete()">Delete permanently</button>
+        </div>
+    </div>
+</div>
+
+<!-- Generic in-page replacement for window.alert(). Cannot be muted by the
+     browser's "Prevent this page from creating additional dialogs" option. -->
+<div id="epmAlertModal" class="gen-modal" role="alertdialog" aria-modal="true" aria-labelledby="epmAlertModalTitle" aria-hidden="true"
+     style="display:none; align-items:center; justify-content:center; padding:20px; box-sizing:border-box; z-index:10000;"
+     onclick="if (event.target === this) epmAlertOk();">
+    <div class="gen-modal-content epm-delete-confirm-card" style="width:420px; max-width:96vw; margin:0; padding:0; overflow:hidden; border:1px solid #a9cbb8; box-shadow:0 12px 36px rgba(0,0,0,.28);">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 18px; background:#dcefe3; border-bottom:1px solid #a9cbb8;">
+            <h3 id="epmAlertModalTitle" style="margin:0; color:#155b3b; font-size:16px;">Notice</h3>
+            <button type="button" aria-label="Close" onclick="epmAlertOk()" style="border:0; background:transparent; color:#426653; font-size:22px; line-height:1; cursor:pointer;">&times;</button>
+        </div>
+        <div style="padding:18px; color:#333;">
+            <p id="epmAlertModalMessage" style="margin:0; white-space:pre-line;"></p>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; background:#f7faf8; border-top:1px solid #e0e9e3;">
+            <button id="epmAlertModalOk" type="button" class="gen-btn" style="margin:0; padding:9px 16px;" onclick="epmAlertOk()">OK</button>
+        </div>
+    </div>
+</div>
+
+<!-- Generic in-page replacement for window.confirm(). Cannot be muted by the
+     browser's "Prevent this page from creating additional dialogs" option. -->
+<div id="epmConfirmModal" class="gen-modal" role="dialog" aria-modal="true" aria-labelledby="epmConfirmModalTitle" aria-hidden="true"
+     style="display:none; align-items:center; justify-content:center; padding:20px; box-sizing:border-box; z-index:10000;"
+     onclick="if (event.target === this) epmConfirmAnswer(false);">
+    <div class="gen-modal-content epm-delete-confirm-card" style="width:460px; max-width:96vw; margin:0; padding:0; overflow:hidden; border:1px solid #a9cbb8; box-shadow:0 12px 36px rgba(0,0,0,.28);">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 18px; background:#dcefe3; border-bottom:1px solid #a9cbb8;">
+            <h3 id="epmConfirmModalTitle" style="margin:0; color:#155b3b; font-size:16px;">Please confirm</h3>
+            <button type="button" aria-label="Close" onclick="epmConfirmAnswer(false)" style="border:0; background:transparent; color:#426653; font-size:22px; line-height:1; cursor:pointer;">&times;</button>
+        </div>
+        <div style="padding:18px; color:#333;">
+            <p id="epmConfirmModalMessage" style="margin:0; white-space:pre-line;"></p>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; background:#f7faf8; border-top:1px solid #e0e9e3;">
+            <button id="epmConfirmModalCancel" type="button" class="gen-btn" style="margin:0; background:#6c757d;" onclick="epmConfirmAnswer(false)">Cancel</button>
+            <button id="epmConfirmModalOk" type="button" class="gen-btn-danger" style="margin:0; padding:9px 16px;" onclick="epmConfirmAnswer(true)">OK</button>
+        </div>
+    </div>
+</div>
+
 <!-- MODALS -->
 <div id="viewConfigModal" class="gen-modal">
     <div class="gen-modal-content" style="width: 700px;">
         <h3>Device Configuration (<span id="view_cfg_mac_title"></span>)</h3>
-        <textarea id="view_cfg_content" readonly class="gen-textarea" style="height: 400px; font-size: 12px; background: #f8f9fa;"></textarea>
+        <textarea id="view_cfg_content" readonly class="gen-textarea shadow-box" style="height: 400px; font-size: 12px; background: #f8f9fa;"></textarea>
         <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
             <button type="button" class="gen-btn-danger" style="margin: 0;" onclick="closeViewConfigModal()">Close</button>
         </div>
@@ -1865,7 +2208,7 @@ function toggleOvpnState(ext, mac, enable) {
             <div style="flex:1;">
                 <label style="margin-top:0;">Subnet to scan (e.g. 192.168.1.0/24):</label>
                 <div style="display:flex; gap:10px;">
-                    <input type="text" id="scan_subnet" style="width: 180px;" class="gen-full-width" value="<?= $detected_host ?>">
+                    <input type="text" id="scan_subnet" style="width: 180px;" class="gen-full-width shadow-box" value="<?= $detected_host ?>">
                     <button type="button" class="gen-btn" style="padding: 5px; margin-top:0; width: 140px; height: 30px; align=middle;" onclick="runSubnetScan()">Scan Subnet</button>
 <!-- hidden debug button                    <button type="button" class="gen-btn" style="margin-top:0; background:#6c757d;" onclick="runScanDebug()">Debug Scan</button> 
 --!>
@@ -1874,7 +2217,7 @@ function toggleOvpnState(ext, mac, enable) {
 
             <div style="flex:1;">
                 <label style="margin-top:0;">Bulk Assign Template to All Scanned:</label>
-                <select id="bulk_scanned_template" class="gen-full-width" onchange="applyBulkTemplateToScanned(this.value)">
+                <select id="bulk_scanned_template" class="gen-full-width shadow-box sans-font" style="height: 30px;" onchange="applyBulkTemplateToScanned(this.value)">
                     <option value="">-- Select Template to Apply All --</option>
                     <?php foreach ($available_templates as $tpl_file => $tpl_label): ?>
                         <option value="<?= htmlspecialchars($tpl_file) ?>"><?= htmlspecialchars($tpl_label) ?></option>
@@ -1912,11 +2255,11 @@ function toggleOvpnState(ext, mac, enable) {
         <h3>Manually Add Phone Device</h3>
         
         <label>MAC Address:</label>
-        <input type="text" id="manual_mac" class="gen-full-width" placeholder="e.g. 001565123456" maxlength="17" oninput="validateManualMacPrefix()">
+        <input type="text" id="manual_mac" class="gen-full-width shadow-box" placeholder="e.g. 001565123456" maxlength="17" style="height: 31px;" oninput="validateManualMacPrefix()">
         <div id="manual_mac_warning" style="display:none; color:#dc3545; font-weight:bold; margin-top:5px;">This doesn't look like a Yealink MAC. Please verify MAC.</div>
 
         <label style="margin-top:10px;">Assign Extension:</label>
-        <select id="manual_ext" class="gen-full-width">
+        <select id="manual_ext" class="gen-full-width shadow-box sans-font" style="height: 30px;">
             <option value="">-- Unassigned --</option>
             <?php foreach ($available_extensions as $ext_id => $ext_data): ?>
                 <option value="<?= $ext_id ?>"><?= $ext_id ?> - <?= htmlspecialchars($ext_data['display_name']) ?></option>
@@ -1924,7 +2267,7 @@ function toggleOvpnState(ext, mac, enable) {
         </select>
 
         <label style="margin-top:10px;">Assign Template:</label>
-        <select id="manual_tpl" class="gen-full-width">
+        <select id="manual_tpl" class="gen-full-width shadow-box sans-font" style="height: 30px;">
             <option value="">-- None --</option>
             <?php foreach ($available_templates as $tpl_file => $tpl_label): ?>
                 <option value="<?= htmlspecialchars($tpl_file) ?>"><?= htmlspecialchars($tpl_label) ?></option>
@@ -1950,7 +2293,7 @@ function toggleOvpnState(ext, mac, enable) {
         <h3>Rebuild Configuration (<span id="single_rebuild_mac_title"></span>)</h3>
         
         <label>Select Template:</label>
-        <select id="single_template_select" class="gen-full-width">
+        <select id="single_template_select" class="gen-full-width ">
             <option value="">-- None --</option>
             <?php foreach ($available_templates as $tpl_file => $tpl_label): ?>
                 <option value="<?= htmlspecialchars($tpl_file) ?>"><?= htmlspecialchars($tpl_label) ?></option>
@@ -1958,7 +2301,7 @@ function toggleOvpnState(ext, mac, enable) {
         </select>
 
         <label style="margin-top:10px;">Override Phone Model:</label>
-        <select id="single_model_select" name="single_model" class="gen-full-width">
+        <select id="single_model_select" name="single_model" class="gen-full-width ">
             <?php foreach ($yealink_models as $m_key => $m_label): ?>
                 <option value="<?= $m_key ?>"><?= $m_label ?></option>
             <?php endforeach; ?>
@@ -2049,189 +2392,271 @@ function toggleOvpnState(ext, mac, enable) {
         <form id="main_cfg_form" method="POST" enctype="multipart/form-data">
             <input type="hidden" id="active_tab_field" name="active_tab" value="<?= htmlspecialchars($formData['active_tab']) ?>">
 
-            <div class="gen-key-row">
-                <div>
-                    <label>PBX Server IP / Domain:</label>
-                    <input type="text" class="gen-full-width" name="server_ip" placeholder="<?= $default_server_target ?>" value="<?= htmlspecialchars($formData['server_ip']) ?>">
-                </div>
-                <div>
-                    <label>Phone Web GUI Admin Password:</label>
-                    <input type="text" class="gen-full-width" name="admin_password" placeholder="22222" value="<?= htmlspecialchars($formData['admin_password']) ?>">
-                </div>
+            <div class="epm-dash-bar">
+                <span class="epm-dash-hint"><i class="fa fa-arrows"></i> Drag a box by its grip to rearrange. <i class="fa fa-arrows-h"></i> toggles half / full width, <i class="fa fa-chevron-up"></i> collapses. Layout is remembered in this browser.</span>
+                <button type="button" class="gen-btn epm-dash-reset" onclick="epmDashReset('epm_dash_global')">Reset layout</button>
             </div>
 
-            <div class="gen-key-row">
-                <div>
-                    <label>Time Zone:</label>
-                    <select name="timezone" class="gen-full-width">
-                        <?php foreach ($timezones as $offset => $tz_name): ?>
-                            <option value="<?= $offset ?>" <?= ($formData['timezone'] == $offset) ? 'selected' : '' ?>><?= $tz_name ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div>
-                    <label>Time Format:</label>
-                    <select name="time_format" class="gen-full-width">
-                        <option value="0" <?= ($formData['time_format'] === '0') ? 'selected' : '' ?>>12-Hour (AM/PM)</option>
-                        <option value="1" <?= ($formData['time_format'] === '1') ? 'selected' : '' ?>>24-Hour (Military)</option>
-                    </select>
-                </div>
-            </div>
+            <div id="epm_dash_global" class="epm-dash" style="font-family: Arial, Helvetica, sans-serif;">
 
-            <div class="gen-key-row">
-                <div>
-                    <label>NTP Server 1:</label>
-                    <input type="text" class="gen-full-width" name="ntp_server1" placeholder="<?= $detected_host ?>" value="<?= htmlspecialchars($formData['ntp_server1']) ?>">
-                </div>
-                <div>
-                    <label>NTP Server 2:</label>
-                    <input type="text" class="gen-full-width" name="ntp_server2" placeholder="pool.ntp.org" value="<?= htmlspecialchars($formData['ntp_server2']) ?>">
-                </div>
-            </div>
-
-            <h3 class="gen-section-title">Auto Provisioning Settings</h3>
-            <div class="gen-key-row">
-                <div>
-                    <label>Provisioning Mode:</label>
-                    <select name="auto_provision_mode" class="gen-full-width">
-                        <option value="7" <?= ($formData['auto_provision_mode'] === '7') ? 'selected' : '' ?>>7 - Power on + Weekly</option>
-                        <option value="6" <?= ($formData['auto_provision_mode'] === '6') ? 'selected' : '' ?>>6 - Power on + Repeatedly</option>
-                        <option value="5" <?= ($formData['auto_provision_mode'] === '5') ? 'selected' : '' ?>>5 - Weekly</option>
-                        <option value="4" <?= ($formData['auto_provision_mode'] === '4') ? 'selected' : '' ?>>4 - Repeatedly</option>
-                        <option value="1" <?= ($formData['auto_provision_mode'] === '1') ? 'selected' : '' ?>>1 - Power on</option>
-                        <option value="0" <?= ($formData['auto_provision_mode'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
-                    </select>
-                </div>
-                <div>
-                    <label>Weekly Provisioning Enable:</label>
-                    <select name="auto_provision_weekly_enable" class="gen-full-width">
-                        <option value="1" <?= ($formData['auto_provision_weekly_enable'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
-                        <option value="0" <?= ($formData['auto_provision_weekly_enable'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
-                    </select>
-                </div>
-                <div>
-                    <label>DHCP Option Enable:</label>
-                    <select name="auto_provision_dhcp_option_enable" class="gen-full-width">
-                        <option value="1" <?= ($formData['auto_provision_dhcp_option_enable'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
-                        <option value="0" <?= ($formData['auto_provision_dhcp_option_enable'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="gen-key-row">
-                <div>
-                    <label>Weekly Begin Time:</label>
-                    <input type="text" class="gen-full-width" name="auto_provision_weekly_begin_time" value="<?= htmlspecialchars($formData['auto_provision_weekly_begin_time']) ?>">
-                </div>
-                <div>
-                    <label>Weekly End Time:</label>
-                    <input type="text" class="gen-full-width" name="auto_provision_weekly_end_time" value="<?= htmlspecialchars($formData['auto_provision_weekly_end_time']) ?>">
-                </div>
-                <div>
-                    <label>Day of Week (0=Sun, 6=Sat):</label>
-                    <select name="auto_provision_weekly_dayofweek" class="gen-full-width">
-                        <option value="0" <?= ($formData['auto_provision_weekly_dayofweek'] === '0') ? 'selected' : '' ?>>0 - Sunday</option>
-                        <option value="1" <?= ($formData['auto_provision_weekly_dayofweek'] === '1') ? 'selected' : '' ?>>1 - Monday</option>
-                        <option value="2" <?= ($formData['auto_provision_weekly_dayofweek'] === '2') ? 'selected' : '' ?>>2 - Tuesday</option>
-                        <option value="3" <?= ($formData['auto_provision_weekly_dayofweek'] === '3') ? 'selected' : '' ?>>3 - Wednesday</option>
-                        <option value="4" <?= ($formData['auto_provision_weekly_dayofweek'] === '4') ? 'selected' : '' ?>>4 - Thursday</option>
-                        <option value="5" <?= ($formData['auto_provision_weekly_dayofweek'] === '5') ? 'selected' : '' ?>>5 - Friday</option>
-                        <option value="6" <?= ($formData['auto_provision_weekly_dayofweek'] === '6') ? 'selected' : '' ?>>6 - Saturday</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="gen-key-row">
-                <div>
-                    <label>Server Username (Optional):</label>
-                    <input type="text" class="gen-full-width" name="auto_provision_username" value="<?= htmlspecialchars($formData['auto_provision_username']) ?>">
-                </div>
-                <div>
-                    <label>Server Password (Optional):</label>
-                    <input type="text" class="gen-full-width" name="auto_provision_password" value="<?= htmlspecialchars($formData['auto_provision_password']) ?>">
-                </div>
-            </div>
-
-            <h3 class="gen-section-title">SIP & Call Transfer Features</h3>
-            <div class="gen-key-row">
-                <div>
-                    <label>Use Outbound Proxy in Dialog:</label>
-                    <select name="sip_use_out_bound_in_dialog" class="gen-full-width">
-                        <option value="1" <?= ($formData['sip_use_out_bound_in_dialog'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
-                        <option value="0" <?= ($formData['sip_use_out_bound_in_dialog'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
-                    </select>
-                </div>
-                <div>
-                    <label>DSS Key Transfer Action:</label>
-                    <select name="transfer_dsskey_deal_type" class="gen-full-width">
-                        <option value="2" <?= ($formData['transfer_dsskey_deal_type'] === '2') ? 'selected' : '' ?>>2 - Attended Transfer</option>
-                        <option value="1" <?= ($formData['transfer_dsskey_deal_type'] === '1') ? 'selected' : '' ?>>1 - Blind Transfer</option>
-                        <option value="0" <?= ($formData['transfer_dsskey_deal_type'] === '0') ? 'selected' : '' ?>>0 - New Call</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="gen-key-row">
-                <div>
-                    <label>Blind Transfer On Hook:</label>
-                    <select name="transfer_blind_tran_on_hook_enable" class="gen-full-width">
-                        <option value="1" <?= ($formData['transfer_blind_tran_on_hook_enable'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
-                        <option value="0" <?= ($formData['transfer_blind_tran_on_hook_enable'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
-                    </select>
-                </div>
-                <div>
-                    <label>On-Hook Transfer:</label>
-                    <select name="transfer_on_hook_trans_enable" class="gen-full-width">
-                        <option value="1" <?= ($formData['transfer_on_hook_trans_enable'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
-                        <option value="0" <?= ($formData['transfer_on_hook_trans_enable'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
-                    </select>
-                </div>
-            </div>
-
-            <h3 class="gen-section-title">Dial Plan (Dial-Now) Rules</h3>
-            <label>Inter-Digit Timeout (Seconds):</label>
-            <select name="dialnow_timeout" class="gen-full-width">
-                <?php for ($sec = 1; $sec <= 14; $sec++): ?>
-                    <option value="<?= $sec ?>" <?= ($formData['dialnow_timeout'] == $sec) ? 'selected' : '' ?>><?= $sec ?> Seconds</option>
-                <?php endfor; ?>
-            </select>
-
-            <label style="margin-top:10px;">Number of DialNow Pattern Slots:</label>
-            <select name="dialnow_count" class="gen-full-width" onchange="updateDialnowVisibility(this.value)">
-                <?php for ($d_cnt = 1; $d_cnt <= 20; $d_cnt++): ?>
-                    <option value="<?= $d_cnt ?>" <?= ($d_cnt == $max_dialnow_slots) ? 'selected' : '' ?>><?= $d_cnt ?> Slots</option>
-                <?php endfor; ?>
-            </select>
-
-            <label style="margin-top:10px;">Outbound Match Patterns (Pulled from route named "outbound")</label>
-            <div style="margin-top:5px;">
-            <?php for ($d = 1; $d <= 20; $d += 2): 
-                $next_slot = $d + 1;
-            ?>
-                <div class="gen-key-row">
-                    <div id="dialnow_slot_<?= $d ?>" style="display: <?= ($d <= $max_dialnow_slots) ? 'block' : 'none' ?>;">
-                        <input type="text" class="gen-full-width" name="dialnow_<?= $d ?>" placeholder="Rule <?= $d ?>" value="<?= htmlspecialchars($formData["dialnow_{$d}"] ?? '') ?>">
-                    </div>
-                    <?php if ($next_slot <= 20): ?>
-                        <div id="dialnow_slot_<?= $next_slot ?>" style="display: <?= ($next_slot <= $max_dialnow_slots) ? 'block' : 'none' ?>;">
-                            <input type="text" class="gen-full-width" name="dialnow_<?= $next_slot ?>" placeholder="Rule <?= $next_slot ?>" value="<?= htmlspecialchars($formData["dialnow_{$next_slot}"] ?? '') ?>">
+                <!-- SERVER & TIME -->
+                <section class="epm-box" id="box_global_server" data-box="global_server" data-span="1">
+                    <header class="epm-box-head">
+                        <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
+                        <strong class="epm-box-title">Server &amp; Time</strong>
+                        <span class="epm-box-tools">
+                            <button type="button" class="epm-tool" data-act="span" title="Half / full width"><i class="fa fa-arrows-h"></i></button>
+                            <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
+                        </span>
+                    </header>
+                    <div class="epm-box-body box-bg">
+                        <div class="epm-template-fields epm-template-two-col">
+                            <div>
+                                <label>PBX Server IP / Domain:</label>
+                                <input type="text" class="shadow-box gen-full-width" name="server_ip" placeholder="<?= $default_server_target ?>" value="<?= htmlspecialchars($formData['server_ip']) ?>">
+                            </div>
+                            <div>
+                                <label>Phone Web GUI Admin Password:</label>
+                                <input type="text" class="gen-full-width shadow-box" name="admin_password" placeholder="22222" value="<?= htmlspecialchars($formData['admin_password']) ?>">
+                            </div>
                         </div>
-                    <?php endif; ?>
-                </div>
-            <?php endfor; ?>
+                        <div class="epm-template-fields epm-template-two-col">
+                            <div>
+                                <label>Time Zone:</label>
+                                <select name="timezone" class="shadow-box gen-full-width">
+                                    <?php foreach ($timezones as $offset => $tz_name): ?>
+                                        <option value="<?= $offset ?>" <?= ($formData['timezone'] == $offset) ? 'selected' : '' ?>><?= $tz_name ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div>
+                                <label>Time Format:</label>
+                                <select name="time_format" class="shadow-box gen-full-width">
+                                    <option value="0" <?= ($formData['time_format'] === '0') ? 'selected' : '' ?>>12-Hour (AM/PM)</option>
+                                    <option value="1" <?= ($formData['time_format'] === '1') ? 'selected' : '' ?>>24-Hour (Military)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="epm-template-fields epm-template-two-col">
+                            <div>
+                                <label>NTP Server 1:</label>
+                                <input type="text" class="shadow-box gen-full-width" name="ntp_server1" placeholder="<?= $detected_host ?>" value="<?= htmlspecialchars($formData['ntp_server1']) ?>">
+                            </div>
+                            <div>
+                                <label>NTP Server 2:</label>
+                                <input type="text" class="shadow-box gen-full-width" name="ntp_server2" placeholder="pool.ntp.org" value="<?= htmlspecialchars($formData['ntp_server2']) ?>">
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- AUTO PROVISIONING -->
+                <section class="epm-box" id="box_auto_provision" data-box="auto_provision" data-span="1">
+                    <header class="epm-box-head">
+                        <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
+                        <strong class="epm-box-title">Auto Provisioning Settings</strong>
+                        <span class="epm-box-tools">
+                            <button type="button" class="epm-tool" data-act="span" title="Half / full width"><i class="fa fa-arrows-h"></i></button>
+                            <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
+                        </span>
+                    </header>
+                    <div class="epm-box-body box-bg">
+                        <div class="epm-template-fields epm-template-three-col">
+                            <div>
+                                <label>Provisioning Mode:</label>
+                                <select name="auto_provision_mode" class="shadow-box gen-full-width">
+                                    <option value="7" <?= ($formData['auto_provision_mode'] === '7') ? 'selected' : '' ?>>7 - Power on + Weekly</option>
+                                    <option value="6" <?= ($formData['auto_provision_mode'] === '6') ? 'selected' : '' ?>>6 - Power on + Repeatedly</option>
+                                    <option value="5" <?= ($formData['auto_provision_mode'] === '5') ? 'selected' : '' ?>>5 - Weekly</option>
+                                    <option value="4" <?= ($formData['auto_provision_mode'] === '4') ? 'selected' : '' ?>>4 - Repeatedly</option>
+                                    <option value="1" <?= ($formData['auto_provision_mode'] === '1') ? 'selected' : '' ?>>1 - Power on</option>
+                                    <option value="0" <?= ($formData['auto_provision_mode'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label>Weekly Provisioning Enable:</label>
+                                <select name="auto_provision_weekly_enable" class="gen-full-width shadow-box">
+                                    <option value="1" <?= ($formData['auto_provision_weekly_enable'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
+                                    <option value="0" <?= ($formData['auto_provision_weekly_enable'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label>DHCP Option Enable:</label>
+                                <select name="auto_provision_dhcp_option_enable" class="gen-full-width shadow-box">
+                                    <option value="1" <?= ($formData['auto_provision_dhcp_option_enable'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
+                                    <option value="0" <?= ($formData['auto_provision_dhcp_option_enable'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="epm-template-fields epm-template-three-col">
+                            <div>
+                                <label>Weekly Begin Time:</label>
+                                <input type="text" class="gen-full-width shadow-box" name="auto_provision_weekly_begin_time" value="<?= htmlspecialchars($formData['auto_provision_weekly_begin_time']) ?>">
+                            </div>
+                            <div>
+                                <label>Weekly End Time:</label>
+                                <input name="auto_provision_weekly_end_time" type="text" class="gen-full-width shadow-box" value="<?= htmlspecialchars($formData['auto_provision_weekly_end_time']) ?>">
+                            </div>
+                            <div>
+                                <label>Day of Week:</label>
+                                <select name="auto_provision_weekly_dayofweek" class="shadow-box gen-full-width">
+                                    <option value="0" <?= ($formData['auto_provision_weekly_dayofweek'] === '0') ? 'selected' : '' ?>>0 - Sunday</option>
+                                    <option value="1" <?= ($formData['auto_provision_weekly_dayofweek'] === '1') ? 'selected' : '' ?>>1 - Monday</option>
+                                    <option value="2" <?= ($formData['auto_provision_weekly_dayofweek'] === '2') ? 'selected' : '' ?>>2 - Tuesday</option>
+                                    <option value="3" <?= ($formData['auto_provision_weekly_dayofweek'] === '3') ? 'selected' : '' ?>>3 - Wednesday</option>
+                                    <option value="4" <?= ($formData['auto_provision_weekly_dayofweek'] === '4') ? 'selected' : '' ?>>4 - Thursday</option>
+                                    <option value="5" <?= ($formData['auto_provision_weekly_dayofweek'] === '5') ? 'selected' : '' ?>>5 - Friday</option>
+                                    <option value="6" <?= ($formData['auto_provision_weekly_dayofweek'] === '6') ? 'selected' : '' ?>>6 - Saturday</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="epm-template-fields epm-template-two-col">
+                            <div>
+                                <label>Server Username (Optional):</label>
+                                <input name="auto_provision_username" type="text" class="shadow-box gen-full-width" value="<?= htmlspecialchars($formData['auto_provision_username']) ?>">
+                            </div>
+                            <div>
+                                <label>Server Password (Optional):</label>
+                                <input name="auto_provision_password" type="text" class="gen-full-width shadow-box" value="<?= htmlspecialchars($formData['auto_provision_password']) ?>">
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- SIP & CALL TRANSFER -->
+                <section class="epm-box" id="box_sip_transfer" data-box="sip_transfer" data-span="1">
+                    <header class="epm-box-head">
+                        <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
+                        <strong class="epm-box-title">SIP &amp; Call Transfer Features</strong>
+                        <span class="epm-box-tools">
+                            <button type="button" class="epm-tool" data-act="span" title="Half / full width"><i class="fa fa-arrows-h"></i></button>
+                            <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
+                        </span>
+                    </header>
+                    <div class="epm-box-body box-bg">
+                        <div class="epm-template-fields epm-template-two-col">
+                            <div>
+                                <label>Use Outbound Proxy in Dialog:</label>
+                                <select name="sip_use_out_bound_in_dialog" class="gen-full-width shadow-box">
+                                    <option value="1" <?= ($formData['sip_use_out_bound_in_dialog'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
+                                    <option value="0" <?= ($formData['sip_use_out_bound_in_dialog'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label>DSS Key Transfer Action:</label>
+                                <select name="transfer_dsskey_deal_type" class="gen-full-width shadow-box">
+                                    <option value="2" <?= ($formData['transfer_dsskey_deal_type'] === '2') ? 'selected' : '' ?>>2 - Attended Transfer</option>
+                                    <option value="1" <?= ($formData['transfer_dsskey_deal_type'] === '1') ? 'selected' : '' ?>>1 - Blind Transfer</option>
+                                    <option value="0" <?= ($formData['transfer_dsskey_deal_type'] === '0') ? 'selected' : '' ?>>0 - New Call</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="epm-template-fields epm-template-two-col">
+                            <div>
+                                <label>Blind Transfer On Hook:</label>
+                                <select name="transfer_blind_tran_on_hook_enable" class="gen-full-width shadow-box">
+                                    <option value="1" <?= ($formData['transfer_blind_tran_on_hook_enable'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
+                                    <option value="0" <?= ($formData['transfer_blind_tran_on_hook_enable'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label>On-Hook Transfer:</label>
+                                <select name="transfer_on_hook_trans_enable" class="gen-full-width shadow-box">
+                                    <option value="1" <?= ($formData['transfer_on_hook_trans_enable'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
+                                    <option value="0" <?= ($formData['transfer_on_hook_trans_enable'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- DIAL PLAN / DIAL-NOW -->
+                <section class="epm-box" id="box_dialnow" data-box="dialnow" data-span="1">
+                    <header class="epm-box-head">
+                        <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
+                        <strong class="epm-box-title">Dial Plan (Dial-Now) Rules</strong>
+                        <span class="epm-box-tools">
+                            <button type="button" class="epm-tool" data-act="span" title="Half / full width"><i class="fa fa-arrows-h"></i></button>
+                            <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
+                        </span>
+                    </header>
+                    <div class="epm-box-body box-bg">
+                        <div class="epm-template-fields epm-template-two-col">
+                            <div>
+                                <label>Number of DialNow Pattern Slots:</label>
+                                <select name="dialnow_count" class="shadow-box gen-full-width" onchange="updateDialnowVisibility(this.value)">
+                                    <?php for ($d_cnt = 1; $d_cnt <= 20; $d_cnt++): ?>
+                                        <option value="<?= $d_cnt ?>" <?= ($d_cnt == $max_dialnow_slots) ? 'selected' : '' ?>><?= $d_cnt ?> Slots</option>
+                                    <?php endfor; ?>
+                                </select>
+                            </div>
+                            <div>
+                                <label>Inter-Digit Timeout:</label>
+                                <select name="dialnow_timeout" class="shadow-box gen-full-width">
+                                    <?php for ($sec = 1; $sec <= 14; $sec++): ?>
+                                        <option value="<?= $sec ?>" <?= ($formData['dialnow_timeout'] == $sec) ? 'selected' : '' ?>><?= $sec ?> Seconds</option>
+                                    <?php endfor; ?>
+                                </select>
+                            </div>
+                        </div>
+
+                        <label style="margin-top:10px;" title="Automatically pulled from outbound route named &quot;outbound&quot;">Outbound Match Patterns</label>
+                        <div style="margin-top:5px;" title="Automatically pulled from outbound route named &quot;outbound&quot;">
+                        <?php for ($d = 1; $d <= 20; $d += 2):
+                            $next_slot = $d + 1;
+                        ?>
+                            <div class="gen-key-row">
+                                <div id="dialnow_slot_<?= $d ?>" style="display: <?= ($d <= $max_dialnow_slots) ? 'block' : 'none' ?>;">
+                                    <input type="text" class="shadow-box gen-full-width" name="dialnow_<?= $d ?>" placeholder="Rule <?= $d ?>" value="<?= htmlspecialchars($formData["dialnow_{$d}"] ?? '') ?>">
+                                </div>
+                                <?php if ($next_slot <= 20): ?>
+                                    <div id="dialnow_slot_<?= $next_slot ?>" style="display: <?= ($next_slot <= $max_dialnow_slots) ? 'block' : 'none' ?>;">
+                                        <input type="text" class="shadow-box gen-full-width" name="dialnow_<?= $next_slot ?>" placeholder="Rule <?= $next_slot ?>" value="<?= htmlspecialchars($formData["dialnow_{$next_slot}"] ?? '') ?>">
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        <?php endfor; ?>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- GLOBAL CUSTOM INPUTS -->
+                <section class="epm-box" id="box_global_custom_inputs" data-box="global_custom_inputs" data-span="1">
+                    <header class="epm-box-head">
+                        <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
+                        <strong class="epm-box-title">Global Custom Key / Value Additions</strong>
+                        <span class="epm-box-tools">
+                            <button type="button" class="epm-tool" data-act="span" title="Half / full width"><i class="fa fa-arrows-h"></i></button>
+                            <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
+                        </span>
+                    </header>
+                    <div class="epm-box-body box-bg" >
+                        
+                        <textarea style="font-size: 14px;" name="custom_inputs_global" placeholder="Add raw global Yealink configuration flags (applied to every y-config file, one per line)" title="Add raw global Yealink configuration flags (applied to every y-config file, one per line)" class="gen-textarea shadow-box"><?= htmlspecialchars($formData['custom_inputs_global']) ?></textarea>
+                    </div>
+                </section>
+
+                <?php if (!empty($generated_common_cfg)): ?>
+                <!-- GENERATED COMMON OUTPUT -->
+                <section class="epm-box" id="box_global_generated_output" data-box="global_generated_output" data-span="1">
+                    <header class="epm-box-head">
+                        <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
+                        <strong class="epm-box-title">Generated Common Output</strong>
+                        <span class="epm-box-tools">
+                            <button type="button" class="epm-tool" data-act="span" title="Half / full width"><i class="fa fa-arrows-h"></i></button>
+                            <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
+                        </span>
+                    </header>
+                    <div class="epm-box-body box-bg">
+                        <textarea readonly class="gen-textarea" style="height:300px;"><?= htmlspecialchars($generated_common_cfg) ?></textarea>
+                        <p style="font-size:12px; color:#666; margin-top:6px;">
+                            This content is synchronized for all Yealink models listed in the template presets. All y-config files saved in <code>/tftpboot/</code>.
+                        </p>
+                    </div>
+                </section>
+                <?php endif; ?>
             </div>
 
-            <h3 class="gen-section-title">Global Custom Key / Value Additions</h3>
-            <label>Add raw global Yealink configuration flags (applied to every y-config file, one per line):</label>
-            <textarea name="custom_inputs_global" class="gen-textarea"><?= htmlspecialchars($formData['custom_inputs_global']) ?></textarea>
-
-			<?php if (!empty($generated_common_cfg)): ?>
-				<h3 class="gen-section-title">Generated Common Output</h3>
-				<textarea readonly class="gen-textarea" style="height:300px;"><?= htmlspecialchars($generated_common_cfg) ?></textarea>
-				<p style="font-size:12px; color:#666; margin-top:6px;">
-					This content is synchronized for all Yealink models listed in the template presets. All y-config files saved in <code>/tftpboot/</code>.
-				</p>
-			<?php endif; ?>
             <br>
             <div style="display: flex; gap: 10px; margin-top: 10px;">
                 <button type="submit" name="save_global" class="gen-btn" style="background: #28a745; margin-top:0;">Save Global Settings to /tftpboot/</button>
@@ -2250,7 +2675,7 @@ function toggleOvpnState(ext, mac, enable) {
 
     <!-- TAB 2: TEMPLATE MANAGER -->
     <div id="tab_template" class="gen-tab-content <?= ($formData['active_tab'] === 'tab_template') ? 'active' : '' ?>">
-        <div class="gen-load-box" style="width: 600px">
+        <div class="gen-load-box" style="width: 600px; border: 1px solid #a2a3a2; box-shadow: 2px 2px 4px #a2a3a2; background: #f7f7f7;">
             <form method="POST" enctype="multipart/form-data">
                 <input type="hidden" id="load_tpl_active_tab_field" name="active_tab" value="tab_template">
                 <label>Active / Edit Template:</label>
@@ -2258,7 +2683,7 @@ function toggleOvpnState(ext, mac, enable) {
                     <?php 
                     $selected_tpl_option = $_POST['template_to_load'] ?? (!empty($formData['template_name']) ? $formData['template_name'] . '.template.cfg' : '');
                     ?>
-                    <select id="select_template_file" name="template_to_load" style="width: 315px; flex: none;">
+                    <select id="select_template_file" name="template_to_load" style="width: 315px; flex: none; border: none !important; background: transparent !important; outline: none !important; box-shadow: 2px 2px 5px #307847;">
                         <option value="" <?= empty($selected_tpl_option) ? 'selected' : '' ?>>-- Select a template to edit --</option>
                         <?php foreach ($available_templates as $tpl_file => $tpl_label): ?>
                             <option value="<?= htmlspecialchars($tpl_file) ?>" <?= ($selected_tpl_option === $tpl_file) ? 'selected' : '' ?>><?= htmlspecialchars($tpl_label) ?></option>
@@ -2273,9 +2698,9 @@ function toggleOvpnState(ext, mac, enable) {
             <form method="POST" enctype="multipart/form-data" style="margin-top:10px; border-top:1px dashed #ccc; padding-top:8px;">
                 <input type="hidden" name="active_tab" value="tab_template">
                 <div style="display:flex; align-items:center; gap:10px;">
-                    <label style="margin:0; font-weight:bold; white-space:nowrap; font-size:12px;">Upload External Template:</label>
-                    <input type="file" name="template_upload" accept=".cfg,.template.cfg" style="padding:4px; font-size:12px;">
-                    <button type="submit" name="upload_template_file" class="gen-btn" style="margin:0; padding:6px 12px; font-size:12px; background:#28a745;" title="Files Saved to /tftpboot/templates/">Upload Template File</button>
+                    <label style="margin:0; font-weight:bold; white-space:nowrap; font-size:13px;">Upload External Template File:</label>
+                    <input type="file" name="template_upload" accept=".cfg,.template.cfg" style="padding:4px; font-size:12px; border: none; background: transparent; outline: none;">
+                    <button type="submit" name="upload_template_file" class="gen-btn" style="width: 300px; margin:0; padding:6px 12px; font-size:12px; background:#28a745;" title="Files Saved to /tftpboot/templates/">Upload</button>
                 </div>
             </form>
         </div>
@@ -2286,10 +2711,10 @@ function toggleOvpnState(ext, mac, enable) {
 
             <div class="epm-dash-bar">
                 <span class="epm-dash-hint"><i class="fa fa-arrows"></i> Drag a box by its grip to rearrange. <i class="fa fa-arrows-h"></i> toggles half / full width, <i class="fa fa-chevron-up"></i> collapses. Layout is remembered in this browser.</span>
-                <button type="button" class="gen-btn epm-dash-reset" onclick="epmDashReset()">Reset layout</button>
+                <button type="button" class="gen-btn epm-dash-reset" onclick="epmDashReset('epm_dash')">Reset layout</button>
             </div>
 
-            <div id="epm_dash" class="epm-dash">
+            <div id="epm_dash" class="epm-dash" style="font-family: Arial, Helvetica, sans-serif;" >
                 <!-- Template configuration dashboard box -->
                 <section class="epm-box" id="box_template_settings" data-box="template_settings" data-span="1">
                     <header class="epm-box-head">
@@ -2301,15 +2726,15 @@ function toggleOvpnState(ext, mac, enable) {
                             <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
                         </span>
                     </header>
-                    <div class="epm-box-body">
+                    <div class="epm-box-body box-bg">
                         <div class="epm-template-fields epm-template-two-col">
                             <div>
                                 <label>Template Name:</label>
-                                <input type="text" class="gen-full-width" name="template_name" placeholder="e.g., T28_Reception" value="<?= htmlspecialchars($formData['template_name']) ?>">
+                                <input type="text" class="gen-full-width shadow-box" name="template_name" placeholder="e.g., T46_Reception" value="<?= htmlspecialchars($formData['template_name']) ?>">
                             </div>
                             <div>
                                 <label>Phone Model Presets:</label>
-                                <select id="select_phone_model" name="phone_model" class="gen-full-width" onchange="handleModelSelect(this.value)">
+                                <select id="select_phone_model" name="phone_model" class="gen-full-width shadow-box" onchange="handleModelSelect(this.value)">
                                     <?php foreach ($yealink_models as $m_key => $m_label): ?>
                                         <option value="<?= $m_key ?>" <?= ($formData['phone_model'] === $m_key) ? 'selected' : '' ?>><?= $m_label ?></option>
                                     <?php endforeach; ?>
@@ -2317,15 +2742,18 @@ function toggleOvpnState(ext, mac, enable) {
                             </div>
                             <div>
                                 <label>Expansion Module Model:</label>
-                                <select id="select_exp_model" name="exp_model" class="gen-full-width" onchange="handleExpSelect()">
-                                    <?php foreach ($expansion_models as $e_key => $e_label): ?>
-                                        <option value="<?= $e_key ?>" <?= ($formData['exp_model'] === $e_key) ? 'selected' : '' ?>><?= $e_label ?></option>
-                                    <?php endforeach; ?>
-                                </select>
+                                <div style="display:flex; gap:6px; align-items:center;">
+                                    <select id="select_exp_model" name="exp_model" class="gen-full-width shadow-box" onchange="handleExpSelect()">
+                                        <?php foreach ($expansion_models as $e_key => $e_label): ?>
+                                            <option value="<?= $e_key ?>" <?= ($formData['exp_model'] === $e_key) ? 'selected' : '' ?>><?= $e_label ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <button type="button" id="btn_exp_wallpaper" class="epm-key-edit" style="<?= in_array($formData['exp_model'], $expansion_wallpaper_models, true) ? '' : 'display:none;' ?>" onclick="openEpmKeyModal('keyModal_expwallpaper')" aria-label="Edit Expansion Module Wallpaper" title="Edit Expansion Module Wallpaper"><i class="fa fa-picture-o"></i></button>
+                                </div>
                             </div>
                             <div>
                                 <label>Expansion Quantity:</label>
-                                <select id="select_exp_count" name="exp_count" class="gen-full-width" onchange="handleExpSelect()">
+                                <select id="select_exp_count" name="exp_count" class="gen-full-width shadow-box" onchange="handleExpSelect()">
                                     <option value="0" <?= ($formData['exp_count'] === '0') ? 'selected' : '' ?>>-- None --</option>
                                     <option value="1" <?= ($formData['exp_count'] === '1') ? 'selected' : '' ?>>1 Unit</option>
                                     <option value="2" <?= ($formData['exp_count'] === '2') ? 'selected' : '' ?>>2 Units</option>
@@ -2336,15 +2764,15 @@ function toggleOvpnState(ext, mac, enable) {
                         <div class="epm-template-fields epm-template-three-col">
                             <div>
                                 <label>SIP Port:</label>
-                                <input type="text" class="gen-full-width" name="sip_port" placeholder="<?= htmlspecialchars($default_sip_port) ?>" value="<?= htmlspecialchars($formData['sip_port']) ?>">
+                                <input type="text"  class="gen-full-width shadow-box" name="sip_port" placeholder="<?= htmlspecialchars($default_sip_port) ?>" value="<?= htmlspecialchars($formData['sip_port']) ?>">
                             </div>
                             <div>
                                 <label>SIP Listen Port:</label>
-                                <input type="text" class="gen-full-width" name="sip_listen_port" placeholder="5062" value="<?= htmlspecialchars($formData['sip_listen_port']) ?>">
+                                <input type="text" class="gen-full-width shadow-box" name="sip_listen_port" placeholder="5062" value="<?= htmlspecialchars($formData['sip_listen_port']) ?>">
                             </div>
                             <div>
                                 <label>Voicemail Extension Number:</label>
-                                <input type="text" class="gen-full-width" name="voicemail_number" placeholder="*97" value="<?= htmlspecialchars($formData['voicemail_number']) ?>">
+                                <input type="text" class="gen-full-width shadow-box" name="voicemail_number" placeholder="*97" value="<?= htmlspecialchars($formData['voicemail_number']) ?>">
                             </div>
                         </div>
                     </div>
@@ -2353,7 +2781,7 @@ function toggleOvpnState(ext, mac, enable) {
 
                 <!-- LINE KEYS -->
                 <!-- Combined Keys dashboard box -->
-<section class="epm-box" id="box_linekeys_launcher" data-box="linekeys" data-span="1">
+<section class="epm-box" id="box_linekeys_launcher" data-box="linekeys" data-span="1" >
   <header class="epm-box-head">
     <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
     <strong class="epm-box-title">Line Keys</strong>
@@ -2363,7 +2791,7 @@ function toggleOvpnState(ext, mac, enable) {
       <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
     </span>
   </header>
-  <div class="epm-box-body">
+  <div class="epm-box-body" >
     <div class="epm-key-overview">
       <div class="epm-key-overview-row">
         <div class="epm-key-overview-label"><strong>Line Keys</strong><span id="summary_linekeys" class="epm-key-summary"></span></div>
@@ -2443,13 +2871,15 @@ function toggleOvpnState(ext, mac, enable) {
                                     </audio>
                                 </div>
 
-                                <div style="display:flex; align-items:center; gap:4px;">
-                                    <label style="font-size:11px; font-weight:600; color:#555; cursor:pointer; margin:0; display:inline-flex; align-items:center; gap:3px;">
-                                        <input type="checkbox" onchange="toggleAudioLoop('audio_player_<?= $clean_id ?>', this.checked)"> Loop
-                                    </label>
-                                </div>
-
                                 <div style="display:flex; align-items:center; gap:2px;">
+                                    <button type="button" class="action-icon-btn loop-icon-btn" title="Loop <?= htmlspecialchars($r_file) ?>" aria-pressed="false" onclick="toggleAudioLoopBtn(this, 'audio_player_<?= $clean_id ?>')">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <polyline points="17 1 21 5 17 9"></polyline>
+                                            <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+                                            <polyline points="7 23 3 19 7 15"></polyline>
+                                            <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+                                        </svg>
+                                    </button>
                                     <button type="button" class="action-icon-btn" title="Trim / Edit <?= htmlspecialchars($r_file) ?>" onclick="editUploadedRingtone('<?= htmlspecialchars($r_file) ?>')">
                                         <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <circle cx="6" cy="6" r="3"></circle>
@@ -2521,7 +2951,7 @@ function toggleOvpnState(ext, mac, enable) {
                 <label style="margin-top:0;">Default Account Ringtone:</label>
                 <p style="font-size:12px; color:#666; margin-top:2px; margin-bottom:10px;">Ringtone for incoming calls on Account 1:</p>
 
-                <select id="account_ringtone_select" name="account_ringtone" class="gen-full-width">
+                <select id="account_ringtone_select" name="account_ringtone" class="gen-full-width shadow-box">
                     <optgroup label="Built-in & System Ringtones">
                         <?php foreach ($builtin_ringtones as $r_val => $r_lbl): 
                             $is_selected = ($formData['account_ringtone'] === $r_val);
@@ -2553,7 +2983,7 @@ function toggleOvpnState(ext, mac, enable) {
                 <div>
                     <label style="margin-top:6px;">Existing file:</label>
                     <div style="display: flex; gap: 5px;">
-                        <select id="select_logo_file" name="logo_file" class="gen-full-width">
+                        <select id="select_logo_file" name="logo_file" class="gen-full-width shadow-box">
                             <option value="">Disabled (mode = 0)</option>
                             <option value="system" <?= ($formData['logo_file'] === 'system') ? 'selected' : '' ?>>System Logo (mode = 1)</option>
                             <?php foreach ($logo_filenames as $l_file): ?>
@@ -2580,16 +3010,14 @@ function toggleOvpnState(ext, mac, enable) {
                 <section class="epm-box" id="box_custom_inputs" data-box="custom_inputs" data-span="1">
                     <header class="epm-box-head">
                         <span class="epm-grip" title="Drag to move"><i class="fa fa-arrows"></i></span>
-                        <strong class="epm-box-title">Template Custom Key / Value Additions</strong>
-                        
+                        <strong class="epm-box-title">Template Custom Key / Value Additions</strong>                     
                         <span class="epm-box-tools">
                             <button type="button" class="epm-tool" data-act="span" title="Half / full width"><i class="fa fa-arrows-h"></i></button>
                             <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
                         </span>
                     </header>
-                    <div class="epm-box-body">
-                        <label>Add raw Yealink configuration flags for this template (One per line):</label>
-                        <textarea name="custom_inputs" class="gen-textarea"><?= htmlspecialchars($formData['custom_inputs']) ?></textarea>
+                    <div class="epm-box-body box-bg">
+                         <textarea name="custom_inputs" placeholder="Add raw Yealink configuration flags for this template (One per line)" title="Add raw Yealink configuration flags for this template (One per line)" class="gen-textarea shadow-box"><?= htmlspecialchars($formData['custom_inputs']) ?></textarea>
                     </div>
                 </section>
 
@@ -2604,14 +3032,14 @@ function toggleOvpnState(ext, mac, enable) {
                             <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
                         </span>
                     </header>
-                    <div class="epm-box-body">
-                        <textarea readonly class="gen-textarea" style="height:250px;"><?= htmlspecialchars($generated_template_cfg) ?></textarea>
+                    <div class="epm-box-body box-bg">
+                        <textarea readonly class="gen-textarea shadow-box"><?= htmlspecialchars($generated_template_cfg) ?></textarea>
                     </div>
                 </section>
                 <?php endif; ?>
             </div>
 
-<div class="epm-key-modal" id="keyModal_linekeys" aria-hidden="true">
+<div style="font-family: Arial, Helvetica, sans-serif !important;" class="epm-key-modal" id="keyModal_linekeys" aria-hidden="true">
   <div class="epm-key-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="keyModalTitle_linekeys">
     <div class="epm-key-modal-head">
       <strong id="keyModalTitle_linekeys"><i class="fa fa-key" aria-hidden="true"></i>&nbsp; Line Keys</strong>
@@ -2621,27 +3049,42 @@ function toggleOvpnState(ext, mac, enable) {
                     <div class="epm-box-body">
                         <div class="epm-toolbar">
                             <label for="select_linekey_count">Slots</label>
-                            <select id="select_linekey_count" name="linekey_count" onchange="updateLinekeyVisibility(this.value)">
+                            <select id="select_linekey_count" name="linekey_count" style="width: 100px; border: none; background: transparent; outline: none; box-shadow: 0px 0px 5px #307847;" onchange="updateLinekeyVisibility(this.value)">
                                 <?php for ($l_cnt = 1; $l_cnt <= 29; $l_cnt++): ?>
                                     <option value="<?= $l_cnt ?>" <?= ($l_cnt == $max_linekeys) ? 'selected' : '' ?>><?= $l_cnt ?> Line Keys</option>
                                 <?php endfor; ?>
                             </select>
                             <span class="epm-toolbar-note">Defaults to the model's key count when you change the phone model.</span>
                         </div>
+                        <div class="epm-toolbar">
+                            <span class="epm-toolbar-note">Drag a key's number to move it, or click a column header to sort (key 1 stays fixed).</span>
+                        </div>
                         <div class="epm-scroll">
-            <div class="gen-kh gen-lk-head"><span class="gen-key-num"></span><span>Type</span><span>Extension</span><span>Label</span><span>Pickup</span><span>Line</span></div>
+            <div class="gen-kh gen-lk-head">
+		<span class="gen-key-num"></span>
+		<span style="padding-left: 20px;">Type</span>
+		<span class="gen-key-sortable" data-key-type="linekey" data-field="value" onclick="toggleKeySort('linekey','value')"  style="padding-left: 15px;">Extension <span class="sort-caret">⇅</span></span>
+		<span class="gen-key-sortable" data-key-type="linekey" data-field="label" onclick="toggleKeySort('linekey','label')" style="padding-left: 15px;">Label <span class="sort-caret">⇅</span></span>
+		<span style="padding-left: 10px;">Pickup</span>
+		<span style="padding-left: 10px;">Line</span>
+	    </div>
+
             <div style="margin-top:10px;">
             <?php for ($i = 1; $i <= 29; $i++): ?>
                 <div id="linekey_row_<?= $i ?>" class="gen-key-row gen-lk-row" style="<?= ($i <= $max_linekeys) ? '' : 'display: none;' ?>">
-                    <span class="gen-key-num"><?= $i ?></span>
                     <?php if ($i === 1): ?>
-                        <select name="linekey_1_type" style="background-color: #e9ecef; pointer-events: none;" readonly tabindex="-1">
+                        <span class="gen-key-num"><?= $i ?></span>
+                    <?php else: ?>
+                        <span class="gen-key-num gen-key-draggable" draggable="true" data-key-type="linekey" data-idx="<?= $i ?>" title="Drag to reorder"><?= $i ?></span>
+                    <?php endif; ?>
+                    <?php if ($i === 1): ?>
+                        <select name="linekey_1_type" style="background-color: #e9ecef; pointer-events: none; border: none; width: 122px; background: transparent; outline: none;" readonly tabindex="-1">
                             <option value="15" selected>Line (15)</option>
                         </select>
-                        <input type="text" name="linekey_1_value" placeholder="Extension Number" value="<?= htmlspecialchars($formData["linekey_1_value"] ?? '') ?>" readonly style="background-color: #e9ecef;">
-                        <input type="text" name="linekey_1_label" placeholder="Extension Name" value="<?= htmlspecialchars($formData["linekey_1_label"] ?? '') ?>" readonly style="background-color: #e9ecef;">
-                        <input type="text" name="linekey_1_pickup" placeholder="Pickup (**)" value="<?= htmlspecialchars($formData["linekey_1_pickup"] ?? '') ?>" readonly style="background-color: #e9ecef;">
-                        <select name="linekey_1_line">
+                        <input type="text" name="linekey_1_value" placeholder="Extension Number" value="<?= htmlspecialchars($formData["linekey_1_value"] ?? '') ?>" readonly style="background-color: #e9ecef; border: none; background: transparent; outline: none;">
+                        <input type="text" name="linekey_1_label" placeholder="Extension Name" value="<?= htmlspecialchars($formData["linekey_1_label"] ?? '') ?>" readonly style="background-color: #e9ecef; border: none; background: transparent; outline: none;">
+                        <input type="text" name="linekey_1_pickup" placeholder="Pickup (**)" value="<?= htmlspecialchars($formData["linekey_1_pickup"] ?? '') ?>" readonly style="background-color: #e9ecef; border: none; background: transparent; outline: none;">
+                        <select name="linekey_1_line" Style=" border: none; background: transparent; outline: none;">
                             <?php 
                             $lk_line_1 = $formData["linekey_1_line"] ?? '1';
                             for ($l = 1; $l <= 16; $l++): 
@@ -2650,7 +3093,7 @@ function toggleOvpnState(ext, mac, enable) {
                             <?php endfor; ?>
                         </select>
                     <?php else: ?>
-                        <select name="linekey_<?= $i ?>_type">
+                        <select name="linekey_<?= $i ?>_type" Style=" border: none; width: 122px; background: transparent; outline: none;">
                             <?php 
                             $current_type = $formData["linekey_{$i}_type"] ?? '16';
                             foreach ($dss_key_types as $k_code => $k_label): 
@@ -2658,10 +3101,10 @@ function toggleOvpnState(ext, mac, enable) {
                                 <option value="<?= $k_code ?>" <?= ($current_type == $k_code) ? 'selected' : '' ?>><?= $k_label ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <input type="text" name="linekey_<?= $i ?>_value" placeholder="Line Key <?= $i ?> Extension" value="<?= htmlspecialchars($formData["linekey_{$i}_value"] ?? '') ?>">
-                        <input type="text" name="linekey_<?= $i ?>_label" placeholder="Label" value="<?= htmlspecialchars($formData["linekey_{$i}_label"] ?? '') ?>">
-                        <input type="text" name="linekey_<?= $i ?>_pickup" placeholder="Pickup (**)" value="<?= htmlspecialchars($formData["linekey_{$i}_pickup"] ?? '**') ?>">
-                        <select name="linekey_<?= $i ?>_line">
+                        <input type="text" name="linekey_<?= $i ?>_value" Style=" border: none; background: transparent; outline: none;" placeholder="Line Key <?= $i ?> Extension" title="Line Key <?= $i ?>" inputmode="numeric" pattern="[0-9]*" oninput="epmDigitsOnly(this)" value="<?= htmlspecialchars($formData["linekey_{$i}_value"] ?? '') ?>">
+                        <input type="text" name="linekey_<?= $i ?>_label" Style=" border: none; background: transparent; outline: none;" placeholder="Label" title="Label" value="<?= htmlspecialchars($formData["linekey_{$i}_label"] ?? '') ?>">
+                        <input type="text" name="linekey_<?= $i ?>_pickup" Style=" border: none; background: transparent; outline: none;" placeholder="Pickup (**)" title="Pickup (**)" value="<?= htmlspecialchars($formData["linekey_{$i}_pickup"] ?? '**') ?>">
+                        <select Style=" border: none; background: transparent; outline: none;" name="linekey_<?= $i ?>_line">
                             <?php 
                             $current_line = $formData["linekey_{$i}_line"] ?? '1';
                             for ($l = 1; $l <= 16; $l++): 
@@ -2683,7 +3126,7 @@ function toggleOvpnState(ext, mac, enable) {
     </div>
   </div>
 </div>
-<div class="epm-key-modal" id="keyModal_memkeys" aria-hidden="true">
+<div style="font-family: Arial, Helvetica, san-sarif !important;" class="epm-key-modal" id="keyModal_memkeys" aria-hidden="true">
   <div class="epm-key-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="keyModalTitle_memkeys">
     <div class="epm-key-modal-head">
       <strong id="keyModalTitle_memkeys"><i class="fa fa-key" aria-hidden="true"></i>&nbsp; Memory / Expansion Keys</strong>
@@ -2694,24 +3137,53 @@ function toggleOvpnState(ext, mac, enable) {
                         <input type="hidden" id="field_base_mem_keys" value="0">
                         <div class="epm-toolbar">
                             <label for="select_memkey_count">Slots</label>
-                            <select id="select_memkey_count" name="memkey_count" onchange="updateMemkeyVisibility(this.value)">
-                                <option value="0" <?= (0 == $max_memkeys) ? 'selected' : '' ?>>0 Slots (Disabled)</option>
+                            <select id="select_memkey_count" style="width: 85px; border: none; background: transparent; outline: none; box-shadow: 0px 0px 5px #307847;" name="memkey_count" onchange="updateMemkeyVisibility(this.value)">
+                                <option value="0" <?= (0 == $max_memkeys) ? 'selected' : '' ?>>0 Slots</option>
                                 <?php for ($k = 1; $k <= 180; $k++): ?>
                                     <option value="<?= $k ?>" <?= ($k == $max_memkeys) ? 'selected' : '' ?>><?= $k ?> Slots</option>
                                 <?php endfor; ?>
                             </select>
                             <span id="memkey_model_note" class="epm-toolbar-note"></span>
                         </div>
+                        <div class="epm-toolbar">
+                            <span class="epm-toolbar-note">Drag a key's number to move it (works across all module pages), or click a column header to sort.</span>
+                        </div>
                         <div id="memkey_pages" class="gen-key-pages" style="display:none;"></div>
                         <p id="memkey_empty" class="gen-key-empty" style="display:none;">No memory key slots. This model has no built-in memory keys; pick an expansion module above, or set a slot count.</p>
                         <div class="epm-scroll">
-            <div id="memkey_head" class="gen-kh gen-mk-head"><span class="gen-key-num"></span><span>Extension</span><span>Pickup</span></div>
+
+            <div id="memkey_head" class="gen-kh gen-mk-head">
+		<span  class="gen-key-num"></span>
+		<span style="padding-left: 20px;">Type</span>
+		<span style="padding-left: 15px;"class="gen-key-sortable" data-key-type="memkey" data-field="value" onclick="toggleKeySort('memkey','value')">Extension <span class="sort-caret">⇅</span></span>
+		<span style="padding-left: 13px;"class="gen-key-sortable" data-key-type="memkey" data-field="label" onclick="toggleKeySort('memkey','label')">Label <span class="sort-caret">⇅</span></span>
+		<span style="padding-left: 10px;">Pickup</span>
+		<span style="padding-left: 10px;">Line</span>
+	    </div>
+
             <div style="margin-top:10px;">
             <?php for ($i = 1; $i <= 180; $i++): ?>
                 <div id="memkey_row_<?= $i ?>" class="gen-key-row gen-mk-row" style="<?= ($i <= $max_memkeys) ? '' : 'display: none;' ?>">
-                    <span class="gen-key-num"><?= $i ?></span>
-                    <input type="text" name="memkey_<?= $i ?>_value" placeholder="Memory Key <?= $i ?> Extension" value="<?= htmlspecialchars($formData["memkey_{$i}_value"] ?? '') ?>">
-                    <input type="text" name="memkey_<?= $i ?>_pickup" placeholder="Pickup Value" value="<?= htmlspecialchars($formData["memkey_{$i}_pickup"] ?? '**') ?>">
+                    <span class="gen-key-num gen-key-draggable" draggable="true" data-key-type="memkey" data-idx="<?= $i ?>" title="Drag to reorder" Style="padding-right: 15px;"><?= $i ?></span>
+                    <select name="memkey_<?= $i ?>_type" Style=" border: none; background: transparent; outline: none;">
+                        <?php
+                        $current_mk_type = $formData["memkey_{$i}_type"] ?? '16';
+                        foreach ($dss_key_types as $mk_code => $mk_label):
+                        ?>
+                            <option value="<?= $mk_code ?>" <?= ($current_mk_type == $mk_code) ? 'selected' : '' ?>><?= $mk_label ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <input type="text" Style=" border: none; background: transparent; outline: none;" name="memkey_<?= $i ?>_value" placeholder="Memory Key <?= $i ?> Extension" title="Memory Key <?= $i ?> Extension" inputmode="numeric" pattern="[0-9]*" oninput="epmDigitsOnly(this)" value="<?= htmlspecialchars($formData["memkey_{$i}_value"] ?? '') ?>">
+                    <input type="text" Style=" border: none; background: transparent; outline: none;" name="memkey_<?= $i ?>_label" placeholder="Label" title="Label" value="<?= htmlspecialchars($formData["memkey_{$i}_label"] ?? '') ?>">
+                    <input type="text" Style=" border: none; background: transparent; outline: none;" name="memkey_<?= $i ?>_pickup" placeholder="Pickup Value" title="Pickup Value" value="<?= htmlspecialchars($formData["memkey_{$i}_pickup"] ?? '**') ?>">
+                    <select Style=" border: none; background: transparent; outline: none;" name="memkey_<?= $i ?>_line">
+                        <?php
+                        $current_mk_line = $formData["memkey_{$i}_line"] ?? '1';
+                        for ($ml = 1; $ml <= 16; $ml++):
+                        ?>
+                            <option value="<?= $ml ?>" <?= ($current_mk_line == $ml) ? 'selected' : '' ?>>Line <?= $ml ?></option>
+                        <?php endfor; ?>
+                    </select>
                 </div>
             <?php endfor; ?>
             </div>
@@ -2731,24 +3203,35 @@ function toggleOvpnState(ext, mac, enable) {
       <strong id="keyModalTitle_progkeys"><i class="fa fa-key" aria-hidden="true"></i>&nbsp; Programmable Keys</strong>
       <button type="button" class="epm-key-modal-x" aria-label="Close" onclick="closeEpmKeyModal('keyModal_progkeys')">&times;</button>
     </div>
-    <div class="epm-key-modal-content"><section class="epm-box epm-key-editor" id="box_progkeys">
+    <div class="epm-key-modal-content sans-font"><section class="epm-box epm-key-editor" id="box_progkeys">
                     <div class="epm-box-body">
                         <div class="epm-toolbar">
                             <span id="progkey_model_note" class="epm-toolbar-note"></span>
-                            <button type="button" class="gen-key-btn-reset" onclick="progKeyResetDefaults()">Reset to default</button>
+                            <button type="button" class="gen-key-btn-reset" style="background: #28a745 !important;" onclick="progKeyResetDefaults()">Reset to default</button>
                         </div>
                         <p class="gen-key-note">Only SoftKey 1-4 show a label on screen. Keys left at their factory function are not written to the template. Mute (Cancel on T21/T23) only takes effect when features.keep_mute.enable = 0.</p>
+                        <div class="gen-key-pages" style="display:flex;">
+                            <button type="button" class="gen-key-page active" data-pk-tab="hard" onclick="setProgKeyTab('hard')">Hard Keys</button>
+                            <button type="button" class="gen-key-page" data-pk-tab="soft" onclick="setProgKeyTab('soft')">Soft Keys</button>
+                        </div>
                         <div class="epm-scroll">
-                        <div class="gen-kh gen-pk-head"><span class="gen-pk-name">Key</span><span>Type</span><span>Line / History</span><span>Value</span><span>Label</span><span>Extension</span></div>
+
+                        <div class="gen-kh gen-pk-head">
+				<span class="gen-pk-name" Style="padding-left: 7px;">Key</span>
+				<span Style="padding-left: 15px;">Type</span>
+				<span Style="padding-left: 10px;">Line / History</span>
+				<span Style="padding-left: 10px;">Value</span>
+				<span Style="padding-left: 10px;">Label</span>
+			</div>
 
                         <?php foreach ($prog_key_names as $pid => $pname):
                             $pk_type = (string)($formData["progkey_{$pid}_type"] ?? '0');
                             $pk_line = (string)($formData["progkey_{$pid}_line"] ?? '1');
                             $pk_hist = (string)($formData["progkey_{$pid}_hist"] ?? '0');
                         ?>
-                        <div id="progkey_row_<?= $pid ?>" class="gen-key-row gen-pk-row">
+                        <div id="progkey_row_<?= $pid ?>" class="gen-key-row gen-pk-row" data-pk-group="<?= ($pid <= 4) ? 'soft' : 'hard' ?>" style="<?= ($pid <= 4) ? 'display:none;' : '' ?>">
                             <span class="gen-pk-name"><?= htmlspecialchars($pname) ?></span>
-                            <select name="progkey_<?= $pid ?>_type" onchange="progKeyRefreshRow(<?= $pid ?>);">
+                            <select Style=" border: none; background: transparent; outline: none;" name="progkey_<?= $pid ?>_type" onchange="progKeyRefreshRow(<?= $pid ?>);">
                                 <?php foreach ($prog_key_types as $t_code => $t_label): ?>
                                     <option value="<?= $t_code ?>" <?= ($pk_type === (string)$t_code) ? 'selected' : '' ?>><?= htmlspecialchars($t_label) ?> (<?= $t_code ?>)</option>
                                 <?php endforeach; ?>
@@ -2756,21 +3239,20 @@ function toggleOvpnState(ext, mac, enable) {
                                     <option value="<?= htmlspecialchars($pk_type) ?>" selected>Other (<?= htmlspecialchars($pk_type) ?>)</option>
                                 <?php endif; ?>
                             </select>
-                            <div class="gen-pk-slot">
-                                <select name="progkey_<?= $pid ?>_line" class="pk-line">
+                            <div class="gen-pk-slot" >
+                                <select Style=" border: none; background: transparent; outline: none;" name="progkey_<?= $pid ?>_line" class="pk-line">
                                     <?php for ($l = 0; $l <= 16; $l++): ?>
                                         <option value="<?= $l ?>" <?= ($pk_line === (string)$l) ? 'selected' : '' ?>><?= ($l === 0) ? 'Auto / All (0)' : 'Line ' . $l ?></option>
                                     <?php endfor; ?>
                                 </select>
-                                <select name="progkey_<?= $pid ?>_hist" class="pk-hist">
+                                <select Style=" border: none; background: transparent; outline: none;" name="progkey_<?= $pid ?>_hist" class="pk-hist">
                                     <option value="0" <?= ($pk_hist === '1') ? '' : 'selected' ?>>Local History</option>
                                     <option value="1" <?= ($pk_hist === '1') ? 'selected' : '' ?>>Network CallLog</option>
                                 </select>
                                 <span class="pk-na">N/A</span>
                             </div>
-                            <input type="text" class="pk-value" name="progkey_<?= $pid ?>_value" placeholder="Number / URL" value="<?= htmlspecialchars($formData["progkey_{$pid}_value"] ?? '') ?>">
-                            <input type="text" class="pk-label" name="progkey_<?= $pid ?>_label" placeholder="Label" value="<?= htmlspecialchars($formData["progkey_{$pid}_label"] ?? '') ?>">
-                            <input type="text" class="pk-ext" name="progkey_<?= $pid ?>_ext" placeholder="Extension" value="<?= htmlspecialchars($formData["progkey_{$pid}_ext"] ?? '') ?>">
+                            <input type="text" Style=" border: none; background: transparent; outline: none;" class="pk-value" name="progkey_<?= $pid ?>_value" placeholder="Number / URL" value="<?= htmlspecialchars($formData["progkey_{$pid}_value"] ?? '') ?>">
+                            <input type="text" Style=" border: none; background: transparent; outline: none;" class="pk-label" name="progkey_<?= $pid ?>_label" placeholder="Label" value="<?= htmlspecialchars($formData["progkey_{$pid}_label"] ?? '') ?>">
                         </div>
                         <?php endforeach; ?>
                         </div>
@@ -2779,6 +3261,48 @@ function toggleOvpnState(ext, mac, enable) {
     <div class="epm-key-modal-foot">
       <span class="epm-key-modal-note">Changes are included when you save the template.</span>
       <button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal('keyModal_progkeys')">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="epm-key-modal" id="keyModal_expwallpaper" aria-hidden="true">
+  <div class="epm-key-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="keyModalTitle_expwallpaper" style="width:min(560px, 96vw);">
+    <div class="epm-key-modal-head">
+      <strong id="keyModalTitle_expwallpaper"><i class="fa fa-picture-o" aria-hidden="true"></i>&nbsp; Expansion Module Wallpaper</strong>
+      <button type="button" class="epm-key-modal-x" aria-label="Close" onclick="closeEpmKeyModal('keyModal_expwallpaper')">&times;</button>
+    </div>
+    <div class="epm-key-modal-content"><section class="epm-box epm-key-editor" id="box_expwallpaper">
+                    <div class="epm-box-body">
+                        <p class="gen-key-note">EXP43 and EXP50 have a color LCD and can show a custom wallpaper/background image (272&times;480). EXP20 and EXP40 do not support this.</p>
+                        <div class="epm-stack">
+                            <div>
+                                <label style="margin-top:6px;">Existing file:</label>
+                                <div style="display: flex; gap: 5px;">
+                                    <select id="select_exp_wallpaper_file" name="exp_wallpaper_file" class="gen-full-width shadow-box">
+                                        <option value="">-- None --</option>
+                                        <?php foreach ($logo_filenames as $wp_file): ?>
+                                            <option value="<?= $wp_file ?>" <?= ($formData['exp_wallpaper_file'] === $wp_file) ? 'selected' : '' ?>><?= $wp_file ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <button type="button" class="gen-btn-danger" style="margin-top:0;" onclick="confirmDeleteFile(document.getElementById('select_exp_wallpaper_file').value, 'logo')">Delete</button>
+                                </div>
+                            </div>
+                            <div>
+                                <label style="margin-top:6px;" title="Files saved to /PhoneSettings/logo/">Upload New Wallpaper (272&times;480):</label>
+                                <div class="upload-controls-col">
+                                    <label for="exp_wallpaper_file_input" class="custom-file-btn">Browse Files</label>
+                                    <input type="file" id="exp_wallpaper_file_input" name="exp_wallpaper_upload" accept=".jpg,.jpeg,.png,.bmp" style="display:none;" onchange="updateExpWallpaperFileLabel(this)">
+                                    <button type="button" id="exp_wallpaper_upload_btn" onclick="uploadExpWallpaperAsync(event)" class="upload-btn-aligned" title="Files saved to /PhoneSettings/logo/">Upload</button>
+                                    <div style="flex-basis:100%; height:0;"></div>
+                                    <span id="exp_wallpaper_file_label" style="font-size:12px; color:#555;">No file selected</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section></div>
+    <div class="epm-key-modal-foot">
+      <span class="epm-key-modal-note">Changes are included when you save the template.</span>
+      <button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal('keyModal_expwallpaper')">Close</button>
     </div>
   </div>
 </div>
@@ -2824,7 +3348,7 @@ function toggleOvpnState(ext, mac, enable) {
                         <th>Template</th>
                         <th>Assigned Extension</th>
                         <?php if ($ovpn_installed): ?>
-                            <th style="text-align:center; width: 100px;">VPN</th>
+                            <th style="text-align:center; width: 100px;" title="Download Key Package in OpenVPN Manager Module">VPN</th>
                         <?php endif; ?>
                     </tr>
                 </thead>
@@ -2858,7 +3382,7 @@ function toggleOvpnState(ext, mac, enable) {
                                                name="edited_mac[<?= htmlspecialchars($dev['mac']) ?>]" 
                                                value="<?= htmlspecialchars($dev['mac']) ?>" 
                                                readonly 
-                                               style="padding:4px; font-weight:bold; width:120px; font-family:monospace; text-transform:lowercase; border-radius:4px; border:1px solid #ccc; background-color:#e9ecef;">
+					       style="padding:4px; font-weight:bold; width:120px; font-family:monospace; text-transform:lowercase; border-radius:4px; border:1px solid #ccc; background-color:#e9ecef; box-shadow: 0 0 8px #307847">
                                         
                                         <button type="button" 
                                                 title="Edit MAC Address" 
@@ -2891,7 +3415,7 @@ function toggleOvpnState(ext, mac, enable) {
                                 <td>Yealink</td>
                                 <td><?= htmlspecialchars($dev['model']) ?></td>
                                 <td>
-                                    <select id="phone_tpl_<?= htmlspecialchars($dev['mac']) ?>" name="phone_template[<?= htmlspecialchars($dev['mac']) ?>]" style="padding:4px; border-radius:4px; border:1px solid #ccc;">
+                                    <select class="shadow-box sans-font" id="phone_tpl_<?= htmlspecialchars($dev['mac']) ?>" name="phone_template[<?= htmlspecialchars($dev['mac']) ?>]" style="padding:4px; border-radius:4px; border:1px solid #ccc;">
                                         <option value="" <?= empty($dev['template']) ? 'selected' : '' ?>>-- None --</option>
                                         <?php foreach ($available_templates as $tpl_file => $tpl_label): ?>
                                             <option value="<?= htmlspecialchars($tpl_file) ?>" <?= ($dev['template'] === $tpl_file) ? 'selected' : '' ?>><?= htmlspecialchars($tpl_label) ?></option>
@@ -2899,7 +3423,7 @@ function toggleOvpnState(ext, mac, enable) {
                                     </select>
                                 </td>
                                 <td>
-                                    <select name="phone_extension[<?= htmlspecialchars($dev['mac']) ?>]" style="padding:4px; border-radius:4px; border:1px solid #ccc;">
+                                    <select class="shadow-box sans-font" name="phone_extension[<?= htmlspecialchars($dev['mac']) ?>]" style="padding:4px; border-radius:4px; border:1px solid #ccc;">
                                         <option value="">-- Unassigned --</option>
                                         <?php foreach ($all_extensions as $ext_id => $ext_data): ?>
                                             <option value="<?= $ext_id ?>" <?= ($dev['ext'] == $ext_id) ? 'selected' : '' ?>><?= $ext_id ?> - <?= htmlspecialchars($ext_data['display_name']) ?></option>
@@ -2910,12 +3434,12 @@ function toggleOvpnState(ext, mac, enable) {
                                 <?php if ($ovpn_installed): ?>
                                     <td style="text-align:center;">
                                         <div style="display:inline-flex; align-items:center; justify-content:center;">
-                                            <label class="switch" style="margin:0;" title="<?= empty($clean_ext) ? 'VPN unavailable: assign an extension to this device first' : 'Turn OpenVPN on or off for this phone' ?>">
+                                            <label class="switch" style="margin:0;" title="<?= empty($clean_ext) ? 'VPN unavailable: assign an extension to this device first' : 'Create or Delete OpenVPN keys' ?>">
                                                 <input type="checkbox" 
                                                        id="vpn_toggle_<?= htmlspecialchars($dev['mac']) ?>" 
                                                        <?= $vpn_enabled ? 'checked' : '' ?> 
                                                        <?= empty($clean_ext) ? 'disabled' : '' ?>
-                                                       onchange="toggleOvpnState('<?= $clean_ext ?>', '<?= htmlspecialchars($dev['mac']) ?>', this.checked)">
+                                                       onchange="handleVpnToggleChange(this, '<?= $clean_ext ?>', '<?= htmlspecialchars($dev['mac']) ?>')">
                                                 <span class="slider"></span>
                                             </label>
 
@@ -2935,13 +3459,13 @@ function toggleOvpnState(ext, mac, enable) {
             <div class="oss-action-card">
                 <h4>Selected Phone(s) Options</h4>
                 <div class="oss-action-line">
-                    <button type="button" class="gen-btn-danger" style="margin:0;" onclick="triggerDeviceAction('delete_selected')">Delete</button>
+                    <button type="button" class="gen-btn-danger" style="margin:0;" onclick="confirmDeleteSelectedPhones()">Delete</button>
                     <span>Delete Selected Phones</span>
                 </div>
                 <div class="oss-action-line" style="flex-wrap: wrap; gap: 10px;">
                     <button type="button" class="gen-btn" style="margin:0; background:#28a745;" onclick="triggerDeviceAction('rebuild_selected')">Rebuild Selected</button>
                     
-                    <select name="bulk_selected_template" style="padding: 6px; border-radius: 4px; border: 1px solid #ccc;">
+                    <select class="shadow-box sans-font" name="bulk_selected_template" style="padding: 6px; border-radius: 4px; border: 1px solid #ccc;">
                         <option value="">-- Use Assigned Individual Templates --</option>
                         <?php foreach ($available_templates as $tpl_file => $tpl_label): ?>
                             <option value="<?= htmlspecialchars($tpl_file) ?>"><?= htmlspecialchars($tpl_label) ?></option>
@@ -2972,14 +3496,14 @@ function toggleOvpnState(ext, mac, enable) {
                     sort($registered_models);
                     ?>
 
-                    <select name="global_filter_model" style="padding: 6px; border-radius: 4px; border: 1px solid #ccc;">
+                    <select name="global_filter_model" class="shadow-box sans-font" style="padding: 6px; border-radius: 4px; border: 1px solid #ccc;">
                         <option value="">-- Select Model --</option>
                         <?php foreach ($registered_models as $registered_m): ?>
                             <option value="<?= htmlspecialchars($registered_m) ?>"><?= htmlspecialchars($registered_m) ?></option>
                         <?php endforeach; ?>
                     </select>
 
-                    <select name="global_filter_template" style="padding: 6px; border-radius: 4px; border: 1px solid #ccc;">
+                    <select name="global_filter_template" class="shadow-box sans-font" style="padding: 6px; border-radius: 4px; border: 1px solid #ccc;">
                         <option value="">-- Select Template --</option>
                         <?php foreach ($available_templates as $tpl_file => $tpl_label): ?>
                             <option value="<?= htmlspecialchars($tpl_file) ?>"><?= htmlspecialchars($tpl_label) ?></option>
@@ -3004,10 +3528,196 @@ function toggleOvpnState(ext, mac, enable) {
     var progKeyIds = <?= json_encode(array_keys($prog_key_names)) ?>;
     var progKeyMaxLines = 16;
     var progKeyPrevModel = null;
+    var progKeyActiveGroup = 'hard';
+
+    function progKeyGroupOf(id) {
+        return (id <= 4) ? 'soft' : 'hard';
+    }
 
     function keyField(name) {
         return document.querySelector('[name="' + name + '"]');
     }
+
+    // ---- Extension fields: digits only (whole numbers) ----------------------
+    function epmDigitsOnly(el) {
+        var cleaned = el.value.replace(/[^0-9]/g, '');
+        if (cleaned !== el.value) { el.value = cleaned; }
+    }
+
+    // ---- Line Key / Memory Key reordering & sorting --------------------------
+    var EPM_KEY_FIELD_MAP = {
+        linekey: { fields: ['type', 'value', 'label', 'pickup', 'line'], countField: 'select_linekey_count', minIdx: 2 },
+        memkey:  { fields: ['type', 'value', 'label', 'pickup', 'line'], countField: 'select_memkey_count',  minIdx: 1 }
+    };
+
+    function epmKeyCount(keyType) {
+        var map = EPM_KEY_FIELD_MAP[keyType];
+        var el = map ? document.getElementById(map.countField) : null;
+        return el ? (parseInt(el.value, 10) || 0) : 0;
+    }
+
+    function epmGetRowData(keyType, idx) {
+        var fields = EPM_KEY_FIELD_MAP[keyType].fields;
+        var data = {};
+        fields.forEach(function (f) {
+            var el = keyField(keyType + '_' + idx + '_' + f);
+            data[f] = el ? el.value : '';
+        });
+        return data;
+    }
+
+    function epmSetRowData(keyType, idx, data) {
+        var fields = EPM_KEY_FIELD_MAP[keyType].fields;
+        fields.forEach(function (f) {
+            var el = keyField(keyType + '_' + idx + '_' + f);
+            if (el) { el.value = (data && data[f] !== undefined) ? data[f] : ''; }
+        });
+    }
+
+    // Moves the key at fromIdx to toIdx, shifting the keys in between — the
+    // slot numbers (and their underlying config names) never move, only the
+    // data inside them does. Line Key 1 (the account/extension key) is fixed
+    // and excluded automatically via minIdx.
+    function reorderKeyRows(keyType, fromIdx, toIdx) {
+        var map = EPM_KEY_FIELD_MAP[keyType];
+        if (!map) { return; }
+        var minIdx = map.minIdx;
+        var count = epmKeyCount(keyType);
+        if (count < minIdx) { return; }
+        fromIdx = Math.max(minIdx, Math.min(count, fromIdx));
+        toIdx = Math.max(minIdx, Math.min(count, toIdx));
+        if (fromIdx === toIdx) { return; }
+
+        var rows = [];
+        for (var i = minIdx; i <= count; i++) { rows.push(epmGetRowData(keyType, i)); }
+
+        var item = rows.splice(fromIdx - minIdx, 1)[0];
+        rows.splice(toIdx - minIdx, 0, item);
+
+        for (var j = 0; j < rows.length; j++) { epmSetRowData(keyType, minIdx + j, rows[j]); }
+        refreshKeySummaries();
+    }
+
+    // field: 'value' (Extension, sorted numerically) or 'label' (sorted alphabetically).
+    // mode: 'asc' or 'desc'. Blank entries always sort to the end either way.
+    function sortKeyRows(keyType, field, mode) {
+        var map = EPM_KEY_FIELD_MAP[keyType];
+        if (!map) { return; }
+        var minIdx = map.minIdx;
+        var count = epmKeyCount(keyType);
+        if (count < minIdx) { return; }
+
+        var rows = [];
+        for (var i = minIdx; i <= count; i++) { rows.push(epmGetRowData(keyType, i)); }
+
+        var isNumeric = (field === 'value');
+        rows.sort(function (a, b) {
+            var av = (a[field] || '').trim();
+            var bv = (b[field] || '').trim();
+            if (av === '' && bv === '') { return 0; }
+            if (av === '') { return 1; }
+            if (bv === '') { return -1; }
+            if (isNumeric) {
+                var an = parseInt(av, 10);
+                var bn = parseInt(bv, 10);
+                if (isNaN(an)) { an = 0; }
+                if (isNaN(bn)) { bn = 0; }
+                return (mode === 'desc') ? (bn - an) : (an - bn);
+            }
+            var cmp = av.localeCompare(bv, undefined, { sensitivity: 'base', numeric: true });
+            return (mode === 'desc') ? -cmp : cmp;
+        });
+
+        for (var j = 0; j < rows.length; j++) { epmSetRowData(keyType, minIdx + j, rows[j]); }
+        refreshKeySummaries();
+    }
+
+    // ---- Column-header sort arrows (Extension / Label) -----------------------
+    var epmKeySortState = {
+        linekey: { field: null, dir: null },
+        memkey:  { field: null, dir: null }
+    };
+
+    function toggleKeySort(keyType, field) {
+        var state = epmKeySortState[keyType];
+        if (!state) { return; }
+        var dir = (state.field === field && state.dir === 'asc') ? 'desc' : 'asc';
+        state.field = field;
+        state.dir = dir;
+        sortKeyRows(keyType, field, dir);
+        updateKeySortIcons(keyType);
+    }
+
+    function updateKeySortIcons(keyType) {
+        var state = epmKeySortState[keyType];
+        if (!state) { return; }
+        document.querySelectorAll('.gen-key-sortable[data-key-type="' + keyType + '"]').forEach(function (el) {
+            var field = el.getAttribute('data-field');
+            var icon = el.querySelector('.sort-caret');
+            if (!icon) { return; }
+            if (state.field === field) {
+                icon.textContent = (state.dir === 'asc') ? '\u25b2' : '\u25bc';
+            } else {
+                icon.textContent = '\u21c5';
+            }
+        });
+    }
+
+    (function () {
+        var dragKeyType = null;
+        var dragFromIdx = null;
+
+        function rowKeyIdx(row, keyType) {
+            if (!row || !row.id) { return null; }
+            var prefix = keyType + '_row_';
+            if (row.id.indexOf(prefix) !== 0) { return null; }
+            var n = parseInt(row.id.slice(prefix.length), 10);
+            return isNaN(n) ? null : n;
+        }
+
+        document.addEventListener('dragstart', function (e) {
+            var handle = e.target.closest && e.target.closest('.gen-key-draggable');
+            if (!handle) { return; }
+            dragKeyType = handle.getAttribute('data-key-type');
+            dragFromIdx = parseInt(handle.getAttribute('data-idx'), 10);
+            if (e.dataTransfer) {
+                e.dataTransfer.effectAllowed = 'move';
+                try { e.dataTransfer.setData('text/plain', String(dragFromIdx)); } catch (err) { /* ignore */ }
+            }
+            var row = handle.closest('.gen-key-row');
+            if (row) { row.classList.add('gen-key-dragging'); }
+        });
+
+        document.addEventListener('dragend', function () {
+            document.querySelectorAll('.gen-key-row.gen-key-dragging').forEach(function (r) { r.classList.remove('gen-key-dragging'); });
+            document.querySelectorAll('.gen-key-row.gen-key-drop-target').forEach(function (r) { r.classList.remove('gen-key-drop-target'); });
+            dragKeyType = null;
+            dragFromIdx = null;
+        });
+
+        document.addEventListener('dragover', function (e) {
+            if (!dragKeyType) { return; }
+            var row = e.target.closest && e.target.closest('.gen-key-row');
+            if (!row || rowKeyIdx(row, dragKeyType) === null) { return; }
+            e.preventDefault();
+            if (e.dataTransfer) { e.dataTransfer.dropEffect = 'move'; }
+            document.querySelectorAll('.gen-key-row.gen-key-drop-target').forEach(function (r) { if (r !== row) { r.classList.remove('gen-key-drop-target'); } });
+            row.classList.add('gen-key-drop-target');
+        });
+
+        document.addEventListener('drop', function (e) {
+            if (!dragKeyType) { return; }
+            var row = e.target.closest && e.target.closest('.gen-key-row');
+            var toIdx = row ? rowKeyIdx(row, dragKeyType) : null;
+            if (toIdx !== null) {
+                e.preventDefault();
+                if (dragFromIdx !== null && dragFromIdx !== toIdx) {
+                    reorderKeyRows(dragKeyType, dragFromIdx, toIdx);
+                }
+            }
+            document.querySelectorAll('.gen-key-row.gen-key-drop-target').forEach(function (r) { r.classList.remove('gen-key-drop-target'); });
+        });
+    })();
 
     document.addEventListener('keydown', function (e) {
         // Enter inside a key box must not submit the whole template form.
@@ -3082,7 +3792,6 @@ function toggleOvpnState(ext, mac, enable) {
         na.style.display = (showLine || showHist) ? 'none' : '';
         if (showLine) { progKeyBuildLineOptions(line, t); }
         progKeySetEnabled(row.querySelector('.pk-value'), progKeyHas(t, 'value'));
-        progKeySetEnabled(row.querySelector('.pk-ext'), progKeyHas(t, 'ext'));
         progKeySetEnabled(row.querySelector('.pk-label'), id <= 4 && t !== 0);
         refreshKeySummaries();
     }
@@ -3099,7 +3808,6 @@ function toggleOvpnState(ext, mac, enable) {
         if (!row) { return false; }
         var val = function (sel) { var e = row.querySelector(sel); return e ? e.value.trim() : ''; };
         if (progKeyHas(t, 'value') && val('.pk-value') !== '') { return true; }
-        if (progKeyHas(t, 'ext') && val('.pk-ext') !== '') { return true; }
         if (id <= 4 && t !== 0 && val('.pk-label') !== '') { return true; }
         if (progKeyHas(t, 'line') && val('.pk-line') !== '1') { return true; }
         if (progKeyHas(t, 'hist') && val('.pk-hist') !== '0') { return true; }
@@ -3123,9 +3831,9 @@ function toggleOvpnState(ext, mac, enable) {
                 var sel = keyField('progkey_' + id + '_type');
                 if (sel) { sel.value = String(newDefs[id]); }
             }
-            row.style.display = (ids.indexOf(id) > -1) ? '' : 'none';
         });
         progKeyPrevModel = model;
+        applyProgKeyVisibility();
         progKeyRefreshAll();
 
         var modelSel = document.getElementById('select_phone_model');
@@ -3137,6 +3845,29 @@ function toggleOvpnState(ext, mac, enable) {
                 : ids.length + ' programmable keys on ' + label + '.';
         }
         refreshKeySummaries();
+    }
+
+    // Shows only the rows that belong to BOTH the selected phone model and the
+    // active Hard Keys / Soft Keys tab.
+    function applyProgKeyVisibility() {
+        var modelSel = document.getElementById('select_phone_model');
+        var model = modelSel ? modelSel.value : 'manual';
+        var ids = progKeyModels[model] || progKeyModels['manual'];
+        progKeyIds.forEach(function (id) {
+            var row = document.getElementById('progkey_row_' + id);
+            if (!row) { return; }
+            var inModel = ids.indexOf(id) > -1;
+            var inGroup = (progKeyGroupOf(id) === progKeyActiveGroup);
+            row.style.display = (inModel && inGroup) ? '' : 'none';
+        });
+    }
+
+    function setProgKeyTab(group) {
+        progKeyActiveGroup = group;
+        document.querySelectorAll('#box_progkeys .gen-key-page[data-pk-tab]').forEach(function (btn) {
+            btn.classList.toggle('active', btn.getAttribute('data-pk-tab') === group);
+        });
+        applyProgKeyVisibility();
     }
 
     function progKeyResetDefaults() {
@@ -3152,7 +3883,6 @@ function toggleOvpnState(ext, mac, enable) {
             row.querySelector('.pk-hist').value = '0';
             row.querySelector('.pk-value').value = '';
             row.querySelector('.pk-label').value = '';
-            row.querySelector('.pk-ext').value = '';
             row.dataset.touched = '';
         });
         progKeyRefreshAll();
@@ -3190,63 +3920,166 @@ function toggleOvpnState(ext, mac, enable) {
         }
     });
 
-    // ---- Template tab dashboard: drag to reorder, half/full width, collapse ------------
+    // ---- Dashboard boxes: two independent columns, drag anywhere, half/full width, collapse ----
+    // Reusable across every dashboard grid on the page (Template Manager, Global Settings, ...);
+    // each instance gets its own element id + localStorage key so their layouts don't collide.
+    //
+    // Layout model: a dash is a list of "bands" stacked top to bottom. A band is either a single
+    // full-width box, or a pair of columns (each an independently-ordered, independent-height list
+    // of box ids). Boxes are dragged straight into whichever column/position the cursor is over, so
+    // a column never has to wait for the box beside it to "catch up".
     (function () {
-        var STORE = 'epm_dash_layout_v4';
-        var dash, defaults = null, dragged = null;
+        var instances = {};
 
-        function readLayout() {
-            try { return JSON.parse(localStorage.getItem(STORE)) || {}; } catch (e) { return {}; }
-        }
-        function boxes() { return Array.prototype.slice.call(dash.querySelectorAll(':scope > .epm-box')); }
-        function persist() {
-            var st = { order: [], span: {}, fold: {} };
-            boxes().forEach(function (b) {
-                var id = b.dataset.box;
-                st.order.push(id);
-                st.span[id] = b.dataset.span;
-                st.fold[id] = b.classList.contains('epm-folded');
-            });
-            try { localStorage.setItem(STORE, JSON.stringify(st)); } catch (e) {}
-        }
-        function apply(st) {
-            if (st.order) {
-                st.order.forEach(function (id) {
-                    var b = dash.querySelector(':scope > [data-box="' + id + '"]');
-                    if (b) { dash.appendChild(b); }
+        function createDash(dashId, storeKey) {
+            var dash = document.getElementById(dashId);
+            if (!dash) { return; }
+
+            var dragged = null;
+
+            function allBoxes() { return Array.prototype.slice.call(dash.querySelectorAll('.epm-box')); }
+            function boxEl(id) { return dash.querySelector('.epm-box[data-box="' + id + '"]'); }
+
+            // Bands implied by the box order + data-span already in the markup, used on first visit
+            // and by "Reset layout". Non-full boxes alternate into column 1 / column 2 in doc order.
+            function defaultBands() {
+                var bands = [], pending = null, turn = 0;
+                allBoxes().forEach(function (b) {
+                    var id = b.dataset.box;
+                    if (b.dataset.span === '2') {
+                        if (pending) { bands.push(pending); pending = null; }
+                        bands.push({ full: id });
+                    } else {
+                        if (!pending) { pending = { cols: [[], []] }; }
+                        pending.cols[turn % 2].push(id);
+                        turn++;
+                    }
+                });
+                if (pending) { bands.push(pending); }
+                return bands;
+            }
+            var initialDefaultBands = defaultBands();
+            var initialFold = {};
+            allBoxes().forEach(function (b) { initialFold[b.dataset.box] = false; });
+
+            // Rebuild the DOM from a bands structure, moving (not cloning) the existing box elements.
+            // Also fixes up each box's data-span to match how it's actually placed.
+            function render(bands, fold) {
+                var frag = document.createDocumentFragment();
+                bands.forEach(function (band) {
+                    if (band.full) {
+                        var b = boxEl(band.full);
+                        if (!b) { return; }
+                        b.dataset.span = '2';
+                        var wrap = document.createElement('div');
+                        wrap.className = 'epm-band epm-band-full';
+                        wrap.appendChild(b);
+                        frag.appendChild(wrap);
+                    } else {
+                        var hasAny = (band.cols[0] && band.cols[0].length) || (band.cols[1] && band.cols[1].length);
+                        if (!hasAny) { return; }
+                        var wrap2 = document.createElement('div');
+                        wrap2.className = 'epm-band';
+                        [0, 1].forEach(function (ci) {
+                            var col = document.createElement('div');
+                            col.className = 'epm-col';
+                            col.dataset.col = String(ci);
+                            (band.cols[ci] || []).forEach(function (id) {
+                                var b2 = boxEl(id);
+                                if (!b2) { return; }
+                                b2.dataset.span = '1';
+                                col.appendChild(b2);
+                            });
+                            wrap2.appendChild(col);
+                        });
+                        frag.appendChild(wrap2);
+                    }
+                });
+                dash.innerHTML = '';
+                dash.appendChild(frag);
+                allBoxes().forEach(function (b) {
+                    b.classList.toggle('epm-folded', !!(fold && fold[b.dataset.box]));
                 });
             }
-            boxes().forEach(function (b) {
-                var id = b.dataset.box;
-                if (st.span && st.span[id]) { b.dataset.span = st.span[id]; }
-                b.classList.toggle('epm-folded', !!(st.fold && st.fold[id]));
-            });
-        }
 
-        window.epmDashReset = function () {
-            if (!dash || !defaults) { return; }
-            try { localStorage.removeItem(STORE); } catch (e) {}
-            apply(defaults);
-        };
+            // Read the live DOM (source of truth while dragging) back into a bands structure.
+            function readBands() {
+                var bands = [];
+                Array.prototype.slice.call(dash.children).forEach(function (bandEl) {
+                    if (bandEl.classList.contains('epm-band-full')) {
+                        var b = bandEl.querySelector('.epm-box');
+                        if (b) { bands.push({ full: b.dataset.box }); }
+                    } else {
+                        var cols = [[], []];
+                        Array.prototype.slice.call(bandEl.children).forEach(function (colEl, ci) {
+                            Array.prototype.slice.call(colEl.children).forEach(function (b) { cols[ci].push(b.dataset.box); });
+                        });
+                        bands.push({ cols: cols });
+                    }
+                });
+                return bands;
+            }
+            function readFold() {
+                var fold = {};
+                allBoxes().forEach(function (b) { fold[b.dataset.box] = b.classList.contains('epm-folded'); });
+                return fold;
+            }
+            function persist() {
+                try { localStorage.setItem(storeKey, JSON.stringify({ bands: readBands(), fold: readFold() })); } catch (e) {}
+            }
+            function readSaved() {
+                try { return JSON.parse(localStorage.getItem(storeKey)) || null; } catch (e) { return null; }
+            }
+            function removeEmptyBands() {
+                Array.prototype.slice.call(dash.children).forEach(function (bandEl) {
+                    if (bandEl.classList.contains('epm-band-full')) { return; }
+                    var total = 0;
+                    Array.prototype.slice.call(bandEl.children).forEach(function (colEl) { total += colEl.children.length; });
+                    if (total === 0) { bandEl.remove(); }
+                });
+            }
 
-        function init() {
-            dash = document.getElementById('epm_dash');
-            if (!dash) { return; }
-            defaults = { order: [], span: {}, fold: {} };
-            boxes().forEach(function (b) {
-                defaults.order.push(b.dataset.box);
-                defaults.span[b.dataset.box] = b.dataset.span;
-                defaults.fold[b.dataset.box] = false;
-            });
-            apply(readLayout());
+            var saved = readSaved();
+            render(saved && saved.bands ? saved.bands : initialDefaultBands, saved ? saved.fold : initialFold);
 
+            // ---- collapse / half-full toggle ----
             dash.addEventListener('click', function (e) {
                 var t = e.target.closest ? e.target.closest('.epm-tool') : null;
                 if (!t) { return; }
                 var box = t.closest('.epm-box');
-                if (t.dataset.act === 'span') { box.dataset.span = (box.dataset.span === '2') ? '1' : '2'; }
-                if (t.dataset.act === 'fold') { box.classList.toggle('epm-folded'); }
-                persist();
+                var id = box.dataset.box;
+                if (t.dataset.act === 'fold') {
+                    box.classList.toggle('epm-folded');
+                    persist();
+                    return;
+                }
+                if (t.dataset.act === 'span') {
+                    var bands = readBands();
+                    var isFull = box.dataset.span === '2';
+                    var next = [];
+                    if (isFull) {
+                        // Going full -> half: drop it into its own new band as a lone column-1 item.
+                        bands.forEach(function (band) {
+                            next.push(band.full === id ? { cols: [[id], []] } : band);
+                        });
+                    } else {
+                        // Going half -> full: pull it out of its column, insert a full-width band there.
+                        bands.forEach(function (band) {
+                            if (band.full) { next.push(band); return; }
+                            var c0 = band.cols[0].filter(function (x) { return x !== id; });
+                            var c1 = band.cols[1].filter(function (x) { return x !== id; });
+                            var removed = c0.length !== band.cols[0].length || c1.length !== band.cols[1].length;
+                            if (removed) {
+                                if (c0.length || c1.length) { next.push({ cols: [c0, c1] }); }
+                                next.push({ full: id });
+                            } else {
+                                next.push(band);
+                            }
+                        });
+                    }
+                    render(next, readFold());
+                    persist();
+                }
             });
 
             // Only start a drag from the grip, so text fields and audio players keep working normally.
@@ -3255,7 +4088,7 @@ function toggleOvpnState(ext, mac, enable) {
                 if (g) { g.closest('.epm-box').setAttribute('draggable', 'true'); }
             });
             document.addEventListener('mouseup', function () {
-                boxes().forEach(function (b) { b.removeAttribute('draggable'); });
+                allBoxes().forEach(function (b) { b.removeAttribute('draggable'); });
             });
             dash.addEventListener('dragstart', function (e) {
                 var b = e.target;
@@ -3267,20 +4100,58 @@ function toggleOvpnState(ext, mac, enable) {
             dash.addEventListener('dragover', function (e) {
                 if (!dragged) { return; }
                 e.preventDefault();
-                var t = e.target.closest ? e.target.closest('.epm-box') : null;
-                if (!t || t === dragged) { return; }
-                var r = t.getBoundingClientRect();
-                var after = e.clientY > r.top + r.height / 2;
-                dash.insertBefore(dragged, after ? t.nextSibling : t);
+
+                if (dragged.dataset.span === '2') {
+                    // Full-width boxes reorder by band, not by column.
+                    var srcBand = dragged.closest('.epm-band');
+                    var targetBand = e.target.closest ? e.target.closest('.epm-band') : null;
+                    if (!targetBand || targetBand === srcBand) { return; }
+                    var rb = targetBand.getBoundingClientRect();
+                    var afterB = e.clientY > rb.top + rb.height / 2;
+                    dash.insertBefore(srcBand, afterB ? targetBand.nextSibling : targetBand);
+                    return;
+                }
+
+                var col = e.target.closest ? e.target.closest('.epm-col') : null;
+                if (!col) { return; }
+                dash.querySelectorAll('.epm-col-drop-target').forEach(function (c) { c.classList.remove('epm-col-drop-target'); });
+                col.classList.add('epm-col-drop-target');
+
+                var siblings = Array.prototype.slice.call(col.children).filter(function (k) { return k !== dragged; });
+                var after = null;
+                for (var i = 0; i < siblings.length; i++) {
+                    var r = siblings[i].getBoundingClientRect();
+                    if (e.clientY < r.top + r.height / 2) { after = siblings[i]; break; }
+                }
+                if (after) { col.insertBefore(dragged, after); } else { col.appendChild(dragged); }
             });
             dash.addEventListener('drop', function (e) { if (dragged) { e.preventDefault(); } });
             dash.addEventListener('dragend', function () {
+                dash.querySelectorAll('.epm-col-drop-target').forEach(function (c) { c.classList.remove('epm-col-drop-target'); });
                 if (!dragged) { return; }
                 dragged.classList.remove('epm-dragging');
                 dragged.removeAttribute('draggable');
                 dragged = null;
+                removeEmptyBands();
                 persist();
             });
+
+            instances[dashId] = {
+                reset: function () {
+                    try { localStorage.removeItem(storeKey); } catch (e) {}
+                    render(initialDefaultBands, initialFold);
+                }
+            };
+        }
+
+        window.epmDashReset = function (dashId) {
+            var inst = instances[dashId || 'epm_dash'];
+            if (inst) { inst.reset(); }
+        };
+
+        function init() {
+            createDash('epm_dash', 'epm_dash_layout_v5');
+            createDash('epm_dash_global', 'epm_dash_global_layout_v2');
         }
 
         if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init); } else { init(); }
@@ -3317,7 +4188,8 @@ function toggleOvpnState(ext, mac, enable) {
                 cfg = 0;
                 for (i = 1; i <= n; i++) {
                     var mv = keyField('memkey_' + i + '_value');
-                    if (mv && mv.value.trim() !== '') { cfg++; }
+                    var ml = keyField('memkey_' + i + '_label');
+                    if ((mv && mv.value.trim() !== '') || (ml && ml.value.trim() !== '')) { cfg++; }
                 }
                 var mb = Math.min(memKeyBase(), n);
                 el.textContent = plural(n, 'slot') + (mb > 0 ? ' (' + mb + ' built-in)' : '') + ', ' + cfg + ' set';

@@ -461,24 +461,83 @@ if (!function_exists('epmReadProtectedFile')) {
     }
 }
 
-// Returns [virtual_ip => common_name] for every client currently connected to the
-// built-in OpenVPN server (management port first, status file as fallback).
+// Locates ovpn_mgr's root helper script. Resolved once per request; cached
+// in a static so repeated calls (device list + debug endpoint, say) don't
+// re-stat the filesystem every time.
+if (!function_exists('epmFindOvpnCtl')) {
+    function epmFindOvpnCtl() {
+        static $path = null;
+        if ($path !== null) { return $path ?: false; }
+
+        global $amp_conf;
+        $amp_web_root = rtrim(($amp_conf['AMPWEBROOT'] ?? null) ?: '/var/www/html', '/');
+        $candidate = "{$amp_web_root}/admin/modules/ovpn_mgr/scripts/ovpnctl";
+        $path = is_executable($candidate) ? $candidate : '';
+        return $path ?: false;
+    }
+}
+
+// Runs `sudo ovpnctl <subcommand>` (the asterisk user's sudoers entry covers
+// the whole script, no per-subcommand restriction). -n so a broken/missing
+// sudo rule fails fast with an error instead of hanging the page on a
+// password prompt that will never come. Returns ['ok' => bool, 'out' => string].
+if (!function_exists('epmRunOvpnCtl')) {
+    function epmRunOvpnCtl($subcommand) {
+        $bin = epmFindOvpnCtl();
+        if ($bin === false) { return ['ok' => false, 'out' => '']; }
+
+        $cmd = implode(' ', array_map('escapeshellarg', ['sudo', '-n', $bin, $subcommand]));
+        $proc = @proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        if (!is_resource($proc)) { return ['ok' => false, 'out' => '']; }
+
+        stream_set_timeout($pipes[1], 3);
+        $out = (string)stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $code = proc_close($proc);
+        return ['ok' => ($code === 0), 'out' => $out];
+    }
+}
+
+// Given [virtual_ip => common_name] pairs, derives the three lookup tables
+// the device list matches phones against: by extension/CN, by MAC-style CN,
+// and by virtual tunnel IP. Shared by the device list and (previously
+// duplicated) inline logic so both match connections the same way.
+if (!function_exists('epmDeriveOvpnLookups')) {
+    function epmDeriveOvpnLookups(array $vpn_clients) {
+        $exts = []; $macs = []; $ips = [];
+        foreach ($vpn_clients as $vip => $cn) {
+            $vip = trim((string)$vip);
+            $cn = strtolower(trim((string)$cn));
+            if ($vip !== '' && !in_array($vip, $ips, true)) { $ips[] = $vip; }
+            if ($cn === '') { continue; }
+            $exts[$cn] = true;
+            if (preg_match('/^client[-_]?(\d+)$/', $cn, $m)) { $exts[$m[1]] = true; }
+            $clean_cn = preg_replace('/[^a-f0-9]/', '', $cn);
+            if ($clean_cn !== '') {
+                $exts[$clean_cn] = true;
+                $macs[$clean_cn] = true;
+            }
+        }
+        return [$exts, $macs, $ips];
+    }
+}
+
+// Returns [virtual_ip => common_name] for every client currently connected to
+// the built-in OpenVPN server. Tries, in order: ovpn_mgr's root helper
+// (reads the status file as root - the sanctioned path, works regardless of
+// its 0600 permissions), a direct read of the same file (in case it's ever
+// made world/group-readable another way), then the management port (kept
+// as a last resort for setups that do pass --management; this module's own
+// start case currently does not).
 if (!function_exists('epmGetOpenVpnClientMap')) {
     function epmGetOpenVpnClientMap() {
         $clients = [];
         $status_output = '';
 
-        $fp = @fsockopen('127.0.0.1', 7505, $errno, $errstr, 1);
-        if ($fp) {
-            stream_set_timeout($fp, 2);
-            fputs($fp, "status\n");
-            while (!feof($fp)) {
-                $line = fgets($fp, 1024);
-                if ($line === false) { break; }
-                $status_output .= $line;
-                if (strpos($line, 'END') === 0) { break; }
-            }
-            fclose($fp);
+        $ovpnctl_result = epmRunOvpnCtl('status');
+        if ($ovpnctl_result['ok'] && trim($ovpnctl_result['out']) !== '') {
+            $status_output = $ovpnctl_result['out'];
         }
 
         if (trim($status_output) === '') {
@@ -489,6 +548,21 @@ if (!function_exists('epmGetOpenVpnClientMap')) {
                     $status_output = epmReadProtectedFile($status_file);
                     if (trim($status_output) !== '') { break; }
                 }
+            }
+        }
+
+        if (trim($status_output) === '') {
+            $fp = @fsockopen('127.0.0.1', 7505, $errno, $errstr, 1);
+            if ($fp) {
+                stream_set_timeout($fp, 2);
+                fputs($fp, "status\n");
+                while (!feof($fp)) {
+                    $line = fgets($fp, 1024);
+                    if ($line === false) { break; }
+                    $status_output .= $line;
+                    if (strpos($line, 'END') === 0) { break; }
+                }
+                fclose($fp);
             }
         }
 
@@ -555,7 +629,7 @@ if (!function_exists('epmGetProvisioningLogMacMap')) {
                     fclose($fh);
                 }
             } else {
-                $content = epmReadProtectedFile($f);                     // sudo -n cat fallback
+                $content = epmReadProtectedFile($f);                     // '' if still unreadable (see setup-root.sh)
                 if (strlen($content) > $max_bytes) {
                     $content = substr($content, -$max_bytes);
                 }
@@ -948,11 +1022,16 @@ $expansion_models = [
     "none"  => "-- None --",
     "EXP20" => "EXP20 (20 Keys per Module)",
     "EXP40" => "EXP40 (40 Keys per Module)",
-    "EXP50" => "EXP50 (60 Keys per Module)"
+    "EXP43" => "EXP43 (60 Keys per Module, Color LCD)",
+    "EXP50" => "EXP50 (60 Keys per Module, Color LCD)"
 ];
 
 // Keys per expansion module (matches the labels above).
-$expansion_key_sizes = ['none' => 0, 'EXP20' => 20, 'EXP40' => 40, 'EXP50' => 60];
+$expansion_key_sizes = ['none' => 0, 'EXP20' => 20, 'EXP40' => 40, 'EXP43' => 60, 'EXP50' => 60];
+
+// Expansion modules with a color LCD that supports a custom wallpaper/background image
+// (wallpaper_upload.url / expansion_module.backgrounds). EXP20/EXP40 have no screen.
+$expansion_wallpaper_models = ['EXP43', 'EXP50'];
 
 // ----------------------------------------------------------------------------
 // Per-model key layout. This is the single source of truth for the page JS and
@@ -1033,9 +1112,9 @@ $prog_key_type_fields = [
     2  => ['line', 'value'],
     9  => ['line', 'value'],
     13 => ['line', 'value'],
-    14 => ['line', 'value', 'ext'],
+    14 => ['line', 'value'],
     23 => ['line', 'value'],
-    24 => ['value', 'ext'],
+    24 => ['value'],
     27 => ['value'],
     28 => ['hist'],
     40 => ['value']
@@ -1100,25 +1179,30 @@ function epm_build_memory_keys_block(array $formData, $count, $base_mem, $exp_si
     $has = false;
     for ($i = 1; $i <= $count; $i++) {
         $val = trim((string)($formData["memkey_{$i}_value"] ?? ''));
-        if ($val === '') { continue; }
+        $lbl = trim((string)($formData["memkey_{$i}_label"] ?? ''));
+        $pickup = isset($formData["memkey_{$i}_pickup"]) ? $formData["memkey_{$i}_pickup"] : '**';
+        if ($pickup === '') { $pickup = '**'; }
+        if ($val === '' && $lbl === '') { continue; }
+
         if (!$has) {
             $out .= "################################################\n";
             $out .= "##         Memory / Expansion Keys              ##\n";
             $out .= "################################################\n\n";
             $has = true;
         }
-        $pickup = isset($formData["memkey_{$i}_pickup"]) ? $formData["memkey_{$i}_pickup"] : '**';
-        if ($pickup === '') { $pickup = '**'; }
+
+        $type = !empty($formData["memkey_{$i}_type"]) ? $formData["memkey_{$i}_type"] : '16';
+        $line_num = !empty($formData["memkey_{$i}_line"]) ? $formData["memkey_{$i}_line"] : '1';
 
         list($prefix, $is_exp) = epm_memkey_prefix($i, $base_mem, $exp_size);
-        $out .= "{$prefix}.value = {$val}\n";
+        $out .= "{$prefix}.line = {$line_num}\n";
+        if (!empty($val)) $out .= "{$prefix}.value = {$val}\n";
         if ($pickup !== 'none') {
             $out .= "{$prefix}.pickup_value = {$pickup}\n";
         }
-        if ($is_exp) {
-            $out .= "{$prefix}.line = 1\n";
-        }
-        $out .= "{$prefix}.type = 16\n\n";
+        $out .= "{$prefix}.type = {$type}\n";
+        if (!empty($lbl)) $out .= "{$prefix}.label = {$lbl}\n";
+        $out .= "\n";
     }
     return $out;
 }
@@ -1144,11 +1228,10 @@ function epm_build_prog_keys_block(array $formData, array $meta) {
             if ($line === '' || !ctype_digit($line)) { $line = '1'; }
         }
         $value = in_array('value', $fields, true) ? epm_prog_clean($formData["progkey_{$id}_value"] ?? '') : '';
-        $ext   = in_array('ext', $fields, true)   ? epm_prog_clean($formData["progkey_{$id}_ext"] ?? '')   : '';
         $hist  = in_array('hist', $fields, true)  ? epm_prog_clean($formData["progkey_{$id}_hist"] ?? '0') : '';
         $label = ($id <= 4 && $type !== 0) ? epm_prog_clean($formData["progkey_{$id}_label"] ?? '') : '';
 
-        $has_extra = ($value !== '' || $ext !== '' || $label !== '' || ($hist !== '' && $hist !== '0') || ($line !== '' && $line !== '1'));
+        $has_extra = ($value !== '' || $label !== '' || ($hist !== '' && $hist !== '0') || ($line !== '' && $line !== '1'));
         if ($type === $default && !$has_extra) { continue; }
 
         if ($out === '') {
@@ -1159,7 +1242,6 @@ function epm_build_prog_keys_block(array $formData, array $meta) {
         $out .= "programablekey.{$id}.type = {$type}\n";
         if ($line !== '')  { $out .= "programablekey.{$id}.line = {$line}\n"; }
         if ($value !== '') { $out .= "programablekey.{$id}.value = {$value}\n"; }
-        if ($ext !== '')   { $out .= "programablekey.{$id}.extension = {$ext}\n"; }
         if ($hist !== '' && $hist !== '0') { $out .= "programablekey.{$id}.history_type = {$hist}\n"; }
         if ($label !== '') { $out .= "programablekey.{$id}.label = {$label}\n"; }
         $out .= "\n";
@@ -1513,6 +1595,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['single_ringtone_ajax'
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['single_wallpaper_ajax'])) {
+    if (ob_get_length()) { ob_clean(); }
+    header('Content-Type: application/json');
+
+    if (isset($_FILES['wallpaper_file']) && $_FILES['wallpaper_file']['error'] === UPLOAD_ERR_OK) {
+        $orig_wp_name = basename($_FILES['wallpaper_file']['name']);
+        $wp_ext = strtolower(pathinfo($orig_wp_name, PATHINFO_EXTENSION));
+
+        if (in_array($wp_ext, ['jpg', 'jpeg', 'png', 'bmp'], true)) {
+            $clean_wp_name = preg_replace('/[^a-zA-Z0-9_\-\.]/', '', $orig_wp_name);
+
+            if (!file_exists($logo_dir)) {
+                @mkdir($logo_dir, 0775, true);
+                @chown($logo_dir, 'asterisk');
+            }
+
+            $target_wp_path = $logo_dir . $clean_wp_name;
+
+            if (move_uploaded_file($_FILES['wallpaper_file']['tmp_name'], $target_wp_path)) {
+                @chown($target_wp_path, 'asterisk');
+                @chgrp($target_wp_path, 'asterisk');
+                clearstatcache(true, $target_wp_path);
+
+                echo json_encode(['status' => 'success', 'filename' => $clean_wp_name]);
+                exit;
+            } else {
+                echo json_encode(['status' => 'error', 'message' => 'Failed to save uploaded wallpaper image.']);
+                exit;
+            }
+        } else {
+            echo json_encode(['status' => 'error', 'message' => 'Invalid file format. Only .jpg, .jpeg, .png and .bmp files are allowed.']);
+            exit;
+        }
+    }
+
+    echo json_encode(['status' => 'error', 'message' => 'Failed to process uploaded wallpaper file.']);
+    exit;
+}
+
 if (isset($_GET['action']) && $_GET['action'] === 'scan_network') {
     if (ob_get_length()) { ob_clean(); }
     header('Content-Type: application/json');
@@ -1609,7 +1730,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'scan_network') {
                  . implode(', ', array_slice($unresolved, 0, 10)) . '.';
         if ($log_result['files'] === 0) {
             $notes[] = 'No readable web-server access log was found (checked /var/log/httpd, /var/log/apache2, /var/log/nginx). '
-                     . 'MACs behind a routed tunnel are learned from the phone\'s provisioning requests, so the "asterisk" user needs read access to that log.';
+                     . 'MACs behind a routed tunnel are learned from the phone\'s provisioning requests, so the "asterisk" user needs read access to that log - '
+                     . 'run (or rerun) scripts/setup-root.sh as root to grant it.';
         } else {
             $notes[] = 'MACs behind a routed tunnel are learned from the phone\'s provisioning request (PhoneSettings/<mac>.cfg). '
                      . 'Reboot the phone or run Auto Provision on it, then scan again.';
@@ -1664,6 +1786,18 @@ if (isset($_GET['action']) && $_GET['action'] === 'scan_debug') {
         $mgmt_err = "{$errno}: {$errstr}";
     }
     $info['openvpn_mgmt_port_7505'] = $mgmt_ok ? 'reachable' : "not reachable ({$mgmt_err})";
+
+    // ---- ovpnctl (primary source as of 1.0.14) ------------------------------
+    $ovpnctl_path = epmFindOvpnCtl();
+    $info['ovpnctl_path'] = $ovpnctl_path ?: 'not found';
+    if ($ovpnctl_path) {
+        $ovpnctl_status = epmRunOvpnCtl('status');
+        $info['ovpnctl_status_ok'] = $ovpnctl_status['ok'];
+        $info['ovpnctl_status_output_preview'] = implode("\n", array_slice(preg_split('/\r?\n/', trim($ovpnctl_status['out'])), 0, 15));
+    } else {
+        $info['ovpnctl_status_ok'] = false;
+        $info['ovpnctl_status_output_preview'] = '';
+    }
 
     // ---- OpenVPN status file candidates ------------------------------------
     $status_candidates = [
@@ -2049,6 +2183,7 @@ $formData = [
     'account_ringtone' => 'Common',
     'uploaded_ringtones' => [],
     'logo_file' => '',
+    'exp_wallpaper_file' => '',
     'dialnow_timeout' => $saved_global_dialnow_timeout,
     'dialnow_count' => count($outbound_patterns) ?: 1,
     'linekey_count' => $max_linekeys,
@@ -2085,8 +2220,11 @@ for ($i = 2; $i <= 29; $i++) {
 }
 
 for ($i = 1; $i <= 180; $i++) {
+    $formData["memkey_{$i}_type"] = "16";
     $formData["memkey_{$i}_value"] = "";
+    $formData["memkey_{$i}_label"] = "";
     $formData["memkey_{$i}_pickup"] = "";
+    $formData["memkey_{$i}_line"] = "1";
 }
 
 foreach (array_keys($prog_key_names) as $pid) {
@@ -2094,7 +2232,6 @@ foreach (array_keys($prog_key_names) as $pid) {
     $formData["progkey_{$pid}_line"] = "1";
     $formData["progkey_{$pid}_value"] = "";
     $formData["progkey_{$pid}_label"] = "";
-    $formData["progkey_{$pid}_ext"] = "";
     $formData["progkey_{$pid}_hist"] = "0";
 }
 
@@ -2136,6 +2273,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
         }
     }
 
+    // Process new expansion module wallpaper uploads (EXP43 / EXP50 only have a screen for this).
+    if (isset($_FILES['exp_wallpaper_upload']) && $_FILES['exp_wallpaper_upload']['error'] === UPLOAD_ERR_OK) {
+        $orig_wp_name = basename($_FILES['exp_wallpaper_upload']['name']);
+        $clean_wp_name = preg_replace('/[^a-zA-Z0-9_\-\.]/', '', $orig_wp_name);
+
+        if (!file_exists($logo_dir)) {
+            @mkdir($logo_dir, 0775, true);
+            @chown($logo_dir, 'asterisk');
+        }
+
+        $target_wp_path = $logo_dir . $clean_wp_name;
+
+        if (move_uploaded_file($_FILES['exp_wallpaper_upload']['tmp_name'], $target_wp_path)) {
+            @chown($target_wp_path, 'asterisk');
+            $formData['exp_wallpaper_file'] = $clean_wp_name;
+        }
+    }
+
     $formData["linekey_1_type"] = "15";
     $formData["linekey_1_line"] = trim($_POST["linekey_1_line"] ?? '1');
     $formData["linekey_1_value"] = trim($_POST["linekey_1_value"] ?? '');
@@ -2151,12 +2306,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     }
 
     for ($i = 1; $i <= 180; $i++) {
+        if (isset($_POST["memkey_{$i}_type"])) $formData["memkey_{$i}_type"] = trim($_POST["memkey_{$i}_type"]);
         if (isset($_POST["memkey_{$i}_value"])) $formData["memkey_{$i}_value"] = trim($_POST["memkey_{$i}_value"]);
+        if (isset($_POST["memkey_{$i}_label"])) $formData["memkey_{$i}_label"] = trim($_POST["memkey_{$i}_label"]);
         if (isset($_POST["memkey_{$i}_pickup"])) $formData["memkey_{$i}_pickup"] = trim($_POST["memkey_{$i}_pickup"]);
+        if (isset($_POST["memkey_{$i}_line"])) $formData["memkey_{$i}_line"] = trim($_POST["memkey_{$i}_line"]);
     }
 
     foreach (array_keys($prog_key_names) as $pid) {
-        foreach (['type', 'line', 'value', 'label', 'ext', 'hist'] as $pf) {
+        foreach (['type', 'line', 'value', 'label', 'hist'] as $pf) {
             if (isset($_POST["progkey_{$pid}_{$pf}"])) {
                 $formData["progkey_{$pid}_{$pf}"] = trim($_POST["progkey_{$pid}_{$pf}"]);
             }
@@ -2251,6 +2409,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     $gen_exp_size = (int)($expansion_key_sizes[$formData['exp_model']] ?? 0);
     $generated_template_cfg .= epm_build_memory_keys_block($formData, $max_memkeys, $gen_base_mem, $gen_exp_size);
 
+    // Expansion module wallpaper: only EXP43 / EXP50 have a color LCD that supports this.
+    if (in_array($formData['exp_model'], $expansion_wallpaper_models, true) && !empty($formData['exp_wallpaper_file'])) {
+        $exp_wp_url = $logo_path_prefix . $formData['exp_wallpaper_file'];
+        $generated_template_cfg .= "################################################\n";
+        $generated_template_cfg .= "##         Expansion Module Wallpaper           ##\n";
+        $generated_template_cfg .= "################################################\n\n";
+        $generated_template_cfg .= "wallpaper_upload.url = {$exp_wp_url}\n";
+        $generated_template_cfg .= "expansion_module.backgrounds = {$formData['exp_wallpaper_file']}\n\n";
+    }
+
     $has_linekeys = false;
     for ($i = 1; $i <= $max_linekeys; $i++) {
         $type = $formData["linekey_{$i}_type"] ?? '16';
@@ -2344,7 +2512,6 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
             $formData["progkey_{$pid}_line"] = "1";
             $formData["progkey_{$pid}_value"] = "";
             $formData["progkey_{$pid}_label"] = "";
-            $formData["progkey_{$pid}_ext"] = "";
             $formData["progkey_{$pid}_hist"] = "0";
         }
         $formData['uploaded_ringtones'] = [];
@@ -2418,7 +2585,7 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
                 $is_parsed_tpl = true;
             }
 
-            if (preg_match('/^memorykey\.(\d+)\.(value|label|type|pickup_value)$/i', $k, $m)) {
+            if (preg_match('/^memorykey\.(\d+)\.(value|label|type|pickup_value|line)$/i', $k, $m)) {
                 $f_name = (strtolower($m[2]) === 'pickup_value') ? 'pickup' : strtolower($m[2]);
                 $formData["memkey_{$m[1]}_{$f_name}"] = $v;
                 if ((int)$m[1] > $highest_tpl_memkey) $highest_tpl_memkey = (int)$m[1];
@@ -2432,18 +2599,23 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
                 if ($tpl_exp_size <= 0) { $tpl_exp_size = 40; }
                 $flat = $tpl_base_mem + (((int)$m[1] - 1) * $tpl_exp_size) + (int)$m[2];
                 $f_name = (strtolower($m[3]) === 'pickup_value') ? 'pickup' : strtolower($m[3]);
-                if ($f_name === 'value' || $f_name === 'pickup') {
+                if (in_array($f_name, ['value', 'pickup', 'type', 'label', 'line'], true)) {
                     $formData["memkey_{$flat}_{$f_name}"] = $v;
                 }
                 if ($flat > $highest_tpl_memkey) $highest_tpl_memkey = $flat;
                 $is_parsed_tpl = true;
             }
 
-            if (preg_match('/^programablekey\.(\d+)\.(type|line|value|label|extension|history_type)$/i', $k, $m) && isset($prog_key_names[(int)$m[1]])) {
+            if (preg_match('/^expansion_module\.backgrounds$/i', $k)) {
+                $formData['exp_wallpaper_file'] = basename($v);
+                $is_parsed_tpl = true;
+            }
+            if (preg_match('/^wallpaper_upload\.url$/i', $k)) { $is_parsed_tpl = true; }
+
+            if (preg_match('/^programablekey\.(\d+)\.(type|line|value|label|history_type)$/i', $k, $m) && isset($prog_key_names[(int)$m[1]])) {
                 $pk_id = (int)$m[1];
                 $pk_field = strtolower($m[2]);
-                if ($pk_field === 'extension') { $pk_field = 'ext'; }
-                elseif ($pk_field === 'history_type') { $pk_field = 'hist'; }
+                if ($pk_field === 'history_type') { $pk_field = 'hist'; }
                 $formData["progkey_{$pk_id}_{$pk_field}"] = $v;
                 if ($pk_field === 'type') { $prog_seen[$pk_id] = true; }
                 $is_parsed_tpl = true;
@@ -2783,81 +2955,11 @@ if (is_array($existing_templates)) {
     }
 }
 
-$ovpn_connected_exts = [];
-$ovpn_connected_macs = [];
-$ovpn_connected_ips  = [];
-
-$status_output = '';
-
-$fp = @fsockopen('127.0.0.1', 7505, $errno, $errstr, 1);
-if ($fp) {
-    fputs($fp, "status\n");
-    while (!feof($fp)) {
-        $line = fgets($fp, 1024);
-        $status_output .= $line;
-        if (strpos($line, 'END') === 0) break;
-    }
-    fclose($fp);
-}
-
-if (empty($status_output)) {
-    $status_file = file_exists('/var/log/openvpn/openvpn-status.log') 
-        ? '/var/log/openvpn/openvpn-status.log' 
-        : '/var/www/html/PhoneSettings/openvpn/logs/openvpn-status.log';
-        
-    if (file_exists($status_file)) {
-        $status_output = (string)@file_get_contents($status_file);
-    }
-}
-
-if (!empty($status_output)) {
-    // Handles all three OpenVPN status formats:
-    //   v2/v3 -> "CLIENT_LIST,<cn>,<real>,<virtual>,..." rows
-    //   v1    -> "Common Name,Real Address,..." table + "ROUTING TABLE" (this is what
-    //            ovpn_mgr writes: its server.conf has "status <file> 1" and no status-version)
-    $mark_ovpn_client = function ($cn, $virt_ip) use (&$ovpn_connected_exts, &$ovpn_connected_macs, &$ovpn_connected_ips) {
-        $cn = strtolower(trim($cn));
-        if ($virt_ip !== '' && !in_array($virt_ip, $ovpn_connected_ips, true)) {
-            $ovpn_connected_ips[] = $virt_ip;
-        }
-        if ($cn === '') {
-            return;
-        }
-        // Exact CN, e.g. "1001" (ovpn_mgr certs) or "client-1001" (EPM-generated certs)
-        $ovpn_connected_exts[$cn] = true;
-        // "client-1001" / "client_1001" -> also register the bare extension "1001"
-        if (preg_match('/^client[-_]?(\d+)$/', $cn, $mExt)) {
-            $ovpn_connected_exts[$mExt[1]] = true;
-        }
-        // MAC-style CNs (legacy behaviour): keep only hex characters
-        $clean_cn = preg_replace('/[^a-f0-9]/', '', $cn);
-        if ($clean_cn !== '') {
-            $ovpn_connected_exts[$clean_cn] = true;
-            $ovpn_connected_macs[$clean_cn] = true;
-        }
-    };
-
-    $section = '';
-    foreach (explode("\n", $status_output) as $line) {
-        $line = rtrim($line, "\r");
-        if (strpos($line, 'CLIENT_LIST') === 0) {                       // v2 / v3
-            $parts = explode(',', $line);
-            $mark_ovpn_client($parts[1] ?? '', trim($parts[3] ?? ''));
-        } elseif (strpos($line, 'OpenVPN CLIENT LIST') === 0) {         // v1 section markers
-            $section = 'clients';
-        } elseif (strpos($line, 'ROUTING TABLE') === 0) {
-            $section = 'routes';
-        } elseif (strpos($line, 'GLOBAL STATS') === 0 || $line === 'END') {
-            $section = '';
-        } elseif ($section === 'clients' && strpos($line, 'Updated,') !== 0 && strpos($line, 'Common Name,') !== 0 && $line !== '') {
-            $parts = explode(',', $line);                                // cn,real,rx,tx,since
-            $mark_ovpn_client($parts[0] ?? '', '');
-        } elseif ($section === 'routes' && strpos($line, 'Virtual Address,') !== 0 && $line !== '') {
-            $parts = explode(',', $line);                                // virtual,cn,real,lastref
-            $mark_ovpn_client($parts[1] ?? '', trim($parts[0] ?? ''));
-        }
-    }
-}
+// Same source and matching rules as the device list's individual VPN
+// dots below (epmGetOpenVpnClientMap -> epmDeriveOvpnLookups): ovpnctl
+// status as root, falling back to a direct file read or the management
+// port if that's ever unavailable.
+[$ovpn_connected_exts, $ovpn_connected_macs, $ovpn_connected_ips] = epmDeriveOvpnLookups(epmGetOpenVpnClientMap());
 
 // Load administrator-registered MACs. These are allowed regardless of OUI.
 $registered_manual_macs = [];

@@ -1,6 +1,27 @@
+1.1.4
+• Line Keys and Memory Keys can now be reordered: drag a key's number to move it (the row numbers/config slots stay put, only the data inside them moves), or use the new Sort buttons to sort all keys by Extension (numeric) or Label (alphabetical), ascending or descending. Blank keys always sort to the end. Line Key 1 (the account/extension key) is excluded from both dragging and sorting since it's fixed.
+• The Extension field on Line Keys and Memory Keys is now restricted to whole numbers (digits only) as you type.
+• Removed the unused Extension field from Programmable Keys (it wasn't used by any current key type there); the "Number/URL" Value field is unaffected.
+• Programmable Keys is now split into two tabs: Hard Keys (nav keys, CONF/Hold/Mute/TRAN/Redial/Message, etc.) and Soft Keys (SoftKey 1-4).
+• Adjusted ringtone loop to use an icon instead of a checkbox/text.
+• Replaced all the browser confirm alerts with custom alerts to avoid the check to ignore browser option that breaks the function
+• Tracking why subnet scanner still not working correctly on OpenVPN subnet.
+
+1.1.3
+• Memory keys now have Type, Label and Line fields alongside Extension and Pickup, matching the Line Keys editor (memorykey.X.type / .label / .line are generated and parsed back from templates).
+• Added the EXP43 color expansion module (60 keys) alongside EXP20/EXP40/EXP50.
+• Selecting EXP43 or EXP50 as the Expansion Module Model now has a Wallpaper picker (these are the only two expansion modules with a color LCD); wallpaper is written as wallpaper_upload.url / expansion_module.backgrounds and re-loads from saved templates.(uploads immediately via AJAX to /PhoneSettings/logo/ and appears in the Existing File dropdown right away, same pattern as ringtone uploads)
+
+1.1.2
+• Overall styling changes.
+• Expanded "Dashboard" design to Global Settings tab.
+• Reworked dashboard rearrangement usability.
+• Fixed VPN permissions to properly read OpenVPN Manager module log for connection "light" status.
+
 1.1.1
-• Created a "Dashboard" design to rearrange sections and expand/collapse them.
+• Created a "Dashboard" design in Template Manager tab to rearrange sections and expand/collapse them.
 • Changed color theme to match Freepbx
+• Added delete confirmation on VPN toggle and Delete selected phones
 
 1.1.0
 • Line keys, memory keys and the new Programmable Keys editor now open as popout windows from a compact "Keys" section on the Template tab. Confirm keeps your edits, Cancel (or Esc) puts everything back; the fields still save with the template.

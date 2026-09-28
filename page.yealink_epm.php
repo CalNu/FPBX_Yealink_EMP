@@ -135,6 +135,7 @@ if (!defined('FREEPBX_IS_AUTH')) {
     .gen-pk-row > *, .gen-pk-head > *, .gen-lk-row > *, .gen-lk-head > *, .gen-mk-row > *, .gen-mk-head > * { min-width: 0; }
     .gen-pk-row input, .gen-pk-row select, .gen-lk-row input, .gen-lk-row select, .gen-mk-row input, .gen-mk-row select { width: 100%; box-sizing: border-box; }
     .pk-na { display: block; padding: 8px; border: 0px solid #dee2e6; border-radius: 4px; background: transparent; color: #888; font-size: 13px; box-sizing: border-box; }
+    .gen-container input.gen-pk-off { background: #e9ecef; color: #888; }
 
     /* ---- Template tab dashboard (movable boxes) ---- */
     .epm-dash-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
@@ -211,9 +212,9 @@ if (!defined('FREEPBX_IS_AUTH')) {
         .epm-box .gen-pk-head { display: none; }
         .epm-box .gen-pk-row { grid-template-columns: 78px repeat(4, minmax(0, 1fr)); padding-bottom: 6px; border-bottom: 1px solid #eee; margin-top: 6px; }
         .epm-box .gen-pk-row > select[name$="_type"] { grid-column: 2 / 4; }
-        .epm-box .gen-pk-row > .gen-pk-slot-linehist { grid-column: 4 / 6; }
-        .epm-box .gen-pk-row > .gen-pk-slot-value { grid-column: 2 / 4; }
-        .epm-box .gen-pk-row > .gen-pk-slot-label { grid-column: 4 / 6; }
+        .epm-box .gen-pk-row > .gen-pk-slot { grid-column: 4 / 6; }
+        .epm-box .gen-pk-row > .pk-value { grid-column: 2 / 4; }
+        .epm-box .gen-pk-row > .pk-label { grid-column: 4 / 6; }
     }
     @media (max-width: 1000px) {
         .epm-band { flex-direction: column; gap: 16px; }
@@ -2473,14 +2474,14 @@ function toggleOvpnState(ext, mac, enable) {
                                 </select>
                             </div>
                             <div>
-                                <label>Weekly Provisioning:</label>
+                                <label>Weekly Provisioning Enable:</label>
                                 <select name="auto_provision_weekly_enable" class="gen-full-width shadow-box">
                                     <option value="1" <?= ($formData['auto_provision_weekly_enable'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
                                     <option value="0" <?= ($formData['auto_provision_weekly_enable'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
                                 </select>
                             </div>
                             <div>
-                                <label>DHCP Option:</label>
+                                <label>DHCP Option Enable:</label>
                                 <select name="auto_provision_dhcp_option_enable" class="gen-full-width shadow-box">
                                     <option value="1" <?= ($formData['auto_provision_dhcp_option_enable'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
                                     <option value="0" <?= ($formData['auto_provision_dhcp_option_enable'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
@@ -3031,8 +3032,8 @@ function toggleOvpnState(ext, mac, enable) {
                             <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
                         </span>
                     </header>
-                    <div class="epm-box-body box-bg" >
-                        <textarea readonly class="gen-textarea shadow-box" style="height: 450px;"><?= htmlspecialchars($generated_template_cfg) ?></textarea>
+                    <div class="epm-box-body box-bg">
+                        <textarea readonly class="gen-textarea shadow-box"><?= htmlspecialchars($generated_template_cfg) ?></textarea>
                     </div>
                 </section>
                 <?php endif; ?>
@@ -3223,28 +3224,12 @@ function toggleOvpnState(ext, mac, enable) {
 				<span Style="padding-left: 10px;">Label</span>
 			</div>
 
-                        <?php $pk_model = $formData['phone_model'] ?? 'manual'; ?>
                         <?php foreach ($prog_key_names as $pid => $pname):
                             $pk_type = (string)($formData["progkey_{$pid}_type"] ?? '0');
                             $pk_line = (string)($formData["progkey_{$pid}_line"] ?? '1');
                             $pk_hist = (string)($formData["progkey_{$pid}_hist"] ?? '0');
-                            // Snapshot, at load time, whether this key is already non-default
-                            // (i.e. already saved/pushed to phones). Rides along as a hidden
-                            // field so that if the admin reverts it back to default during this
-                            // edit, the save still knows to write the default explicitly instead
-                            // of silently dropping the key - see epm_build_prog_keys_block().
-                            $pk_was_custom = epm_prog_key_is_custom($pid, $pk_model, $formData, $prog_meta);
                         ?>
                         <div id="progkey_row_<?= $pid ?>" class="gen-key-row gen-pk-row" data-pk-group="<?= ($pid <= 4) ? 'soft' : 'hard' ?>" style="<?= ($pid <= 4) ? 'display:none;' : '' ?>">
-                            <input type="hidden" name="progkey_<?= $pid ?>_wascustom" value="<?= $pk_was_custom ? '1' : '' ?>">
-                            <!-- Snapshot of what's already in effect (before this edit) so a save that
-                                 drops a field the new type doesn't use can null it out instead of just
-                                 leaving the stale value on the phone - see epm_prog_key_null_fields(). -->
-                            <input type="hidden" name="progkey_<?= $pid ?>_prevtype" value="<?= htmlspecialchars($pk_type) ?>">
-                            <input type="hidden" name="progkey_<?= $pid ?>_prevline" value="<?= htmlspecialchars($pk_line) ?>">
-                            <input type="hidden" name="progkey_<?= $pid ?>_prevhist" value="<?= htmlspecialchars($pk_hist) ?>">
-                            <input type="hidden" name="progkey_<?= $pid ?>_prevvalue" value="<?= htmlspecialchars($formData["progkey_{$pid}_value"] ?? '') ?>">
-                            <input type="hidden" name="progkey_<?= $pid ?>_prevlabel" value="<?= htmlspecialchars($formData["progkey_{$pid}_label"] ?? '') ?>">
                             <span class="gen-pk-name"><?= htmlspecialchars($pname) ?></span>
                             <select Style=" border: none; background: transparent; outline: none;" name="progkey_<?= $pid ?>_type" onchange="progKeyRefreshRow(<?= $pid ?>);">
                                 <?php foreach ($prog_key_types as $t_code => $t_label): ?>
@@ -3254,7 +3239,7 @@ function toggleOvpnState(ext, mac, enable) {
                                     <option value="<?= htmlspecialchars($pk_type) ?>" selected>Other (<?= htmlspecialchars($pk_type) ?>)</option>
                                 <?php endif; ?>
                             </select>
-                            <div class="gen-pk-slot gen-pk-slot-linehist">
+                            <div class="gen-pk-slot" >
                                 <select Style=" border: none; background: transparent; outline: none;" name="progkey_<?= $pid ?>_line" class="pk-line">
                                     <?php for ($l = 0; $l <= 16; $l++): ?>
                                         <option value="<?= $l ?>" <?= ($pk_line === (string)$l) ? 'selected' : '' ?>><?= ($l === 0) ? 'Auto / All (0)' : 'Line ' . $l ?></option>
@@ -3266,14 +3251,8 @@ function toggleOvpnState(ext, mac, enable) {
                                 </select>
                                 <span class="pk-na">N/A</span>
                             </div>
-                            <div class="gen-pk-slot gen-pk-slot-value">
-                                <input type="text" Style=" border: none; background: transparent; outline: none;" class="pk-value" name="progkey_<?= $pid ?>_value" placeholder="Number / URL" value="<?= htmlspecialchars($formData["progkey_{$pid}_value"] ?? '') ?>">
-                                <span class="pk-na">N/A</span>
-                            </div>
-                            <div class="gen-pk-slot gen-pk-slot-label">
-                                <input type="text" Style=" border: none; background: transparent; outline: none;" class="pk-label" name="progkey_<?= $pid ?>_label" placeholder="Label" value="<?= htmlspecialchars($formData["progkey_{$pid}_label"] ?? '') ?>">
-                                <span class="pk-na">N/A</span>
-                            </div>
+                            <input type="text" Style=" border: none; background: transparent; outline: none;" class="pk-value" name="progkey_<?= $pid ?>_value" placeholder="Number / URL" value="<?= htmlspecialchars($formData["progkey_{$pid}_value"] ?? '') ?>">
+                            <input type="text" Style=" border: none; background: transparent; outline: none;" class="pk-label" name="progkey_<?= $pid ?>_label" placeholder="Label" value="<?= htmlspecialchars($formData["progkey_{$pid}_label"] ?? '') ?>">
                         </div>
                         <?php endforeach; ?>
                         </div>
@@ -3772,6 +3751,13 @@ function toggleOvpnState(ext, mac, enable) {
         return progKeyModelDefaults[model] || progKeyModelDefaults['manual'];
     }
 
+    function progKeySetEnabled(input, on) {
+        if (!input) { return; }
+        input.readOnly = !on;
+        input.tabIndex = on ? 0 : -1;
+        input.classList.toggle('gen-pk-off', !on);
+    }
+
     function progKeyBuildLineOptions(sel, type) {
         var cur = sel.value || '1';
         var allowZero = (type === 2 || type === 13 || type === 14);
@@ -3792,30 +3778,21 @@ function toggleOvpnState(ext, mac, enable) {
         if (sel.selectedIndex < 0) { sel.value = '1'; }
     }
 
-    // Swaps a field out for an "N/A" placeholder when the selected type doesn't
-    // use it - same treatment for Value/Label as Line/History already get,
-    // rather than just disabling the input (which is easy to miss visually).
-    function progKeySwap(input, na, on) {
-        if (!input || !na) { return; }
-        input.style.display = on ? '' : 'none';
-        na.style.display = on ? 'none' : '';
-    }
-
     function progKeyRefreshRow(id) {
         var row = document.getElementById('progkey_row_' + id);
         if (!row) { return; }
         var t = progKeyType(id);
         var line = row.querySelector('.pk-line');
         var hist = row.querySelector('.pk-hist');
-        var na = row.querySelector('.gen-pk-slot-linehist .pk-na');
+        var na = row.querySelector('.pk-na');
         var showLine = progKeyHas(t, 'line');
         var showHist = progKeyHas(t, 'hist');
         line.style.display = showLine ? '' : 'none';
         hist.style.display = showHist ? '' : 'none';
         na.style.display = (showLine || showHist) ? 'none' : '';
         if (showLine) { progKeyBuildLineOptions(line, t); }
-        progKeySwap(row.querySelector('.pk-value'), row.querySelector('.gen-pk-slot-value .pk-na'), progKeyHas(t, 'value'));
-        progKeySwap(row.querySelector('.pk-label'), row.querySelector('.gen-pk-slot-label .pk-na'), id <= 4 && t !== 0);
+        progKeySetEnabled(row.querySelector('.pk-value'), progKeyHas(t, 'value'));
+        progKeySetEnabled(row.querySelector('.pk-label'), id <= 4 && t !== 0);
         refreshKeySummaries();
     }
 

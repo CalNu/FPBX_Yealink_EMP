@@ -1109,7 +1109,7 @@ $prog_key_types = [
 // Which extra fields a key type actually uses (line, value, ext, hist).
 // Label is handled separately: only SoftKey 1-4 have an on-screen label.
 $prog_key_type_fields = [
-    2  => ['line'],
+    2  => ['line', 'value'],
     9  => ['line', 'value'],
     13 => ['line', 'value'],
     14 => ['line', 'value'],
@@ -1152,73 +1152,6 @@ function epm_prog_key_default($model, $id, array $meta) {
         return (int)$meta['overrides'][$model][$id];
     }
     return (int)($meta['defaults'][$id] ?? 0);
-}
-
-// True if the key's *currently loaded* form values (i.e. what's already saved in
-// the template / already been pushed to phones) differ from the factory default -
-// same test the popout's JS runs client-side (progKeyIsCustom). Used at render time
-// to snapshot "was this non-default before the admin touches anything in this edit",
-// so a later save that reverts the key back to default still knows to explicitly
-// write the default (instead of silently omitting the key) and actually overwrite
-// whatever non-default value is already sitting on the phone.
-function epm_prog_key_is_custom($id, $model, array $formData, array $meta) {
-    $type_raw = trim((string)($formData["progkey_{$id}_type"] ?? ''));
-    if ($type_raw === '' || !ctype_digit($type_raw)) { return false; }
-    $type = (int)$type_raw;
-    $default = epm_prog_key_default($model, $id, $meta);
-    if ($type !== $default) { return true; }
-
-    $fields = $meta['fields'][$type] ?? [];
-    if (in_array('value', $fields, true) && trim((string)($formData["progkey_{$id}_value"] ?? '')) !== '') { return true; }
-    if ($id <= 4 && $type !== 0 && trim((string)($formData["progkey_{$id}_label"] ?? '')) !== '') { return true; }
-    if (in_array('line', $fields, true)) {
-        $line = trim((string)($formData["progkey_{$id}_line"] ?? '1'));
-        if ($line !== '' && $line !== '1') { return true; }
-    }
-    if (in_array('hist', $fields, true)) {
-        $hist = trim((string)($formData["progkey_{$id}_hist"] ?? '0'));
-        if ($hist !== '' && $hist !== '0') { return true; }
-    }
-    return false;
-}
-
-// Which of this key's fields (line/value/hist/label) were meaningfully in effect
-// under the PREVIOUS type (the one already saved/pushed to the phone when this
-// edit started) but are no longer used by the type being saved now. Those need
-// an explicit %NULL% written for them - see the note in epm_build_prog_keys_block()
-// on why simply omitting a no-longer-used field isn't enough (Yealink templates
-// are overrides, not full state, so a stale value keeps overriding the phone
-// forever otherwise).
-function epm_prog_key_null_fields($id, $new_type, array $formData, array $meta) {
-    $prev_type_raw = trim((string)($formData["progkey_{$id}_prevtype"] ?? ''));
-    if ($prev_type_raw === '' || !ctype_digit($prev_type_raw)) { return []; }
-    $prev_type = (int)$prev_type_raw;
-    if ($prev_type === $new_type) { return []; }
-
-    $prev_fields = $meta['fields'][$prev_type] ?? [];
-    $new_fields  = $meta['fields'][$new_type] ?? [];
-    $null_fields = [];
-
-    // Line is always written whenever a type uses it (even at its default of "1"),
-    // so it always needs clearing when the new type drops it.
-    if (in_array('line', $prev_fields, true) && !in_array('line', $new_fields, true)) {
-        $null_fields[] = 'line';
-    }
-    if (in_array('hist', $prev_fields, true) && !in_array('hist', $new_fields, true)) {
-        $prev_hist = trim((string)($formData["progkey_{$id}_prevhist"] ?? '0'));
-        if ($prev_hist !== '' && $prev_hist !== '0') { $null_fields[] = 'hist'; }
-    }
-    if (in_array('value', $prev_fields, true) && !in_array('value', $new_fields, true)) {
-        $prev_value = trim((string)($formData["progkey_{$id}_prevvalue"] ?? ''));
-        if ($prev_value !== '') { $null_fields[] = 'value'; }
-    }
-    $prev_label_active = ($id <= 4 && $prev_type !== 0);
-    $new_label_active  = ($id <= 4 && $new_type !== 0);
-    if ($prev_label_active && !$new_label_active) {
-        $prev_label = trim((string)($formData["progkey_{$id}_prevlabel"] ?? ''));
-        if ($prev_label !== '') { $null_fields[] = 'label'; }
-    }
-    return $null_fields;
 }
 
 function epm_prog_clean($s) {
@@ -1299,23 +1232,7 @@ function epm_build_prog_keys_block(array $formData, array $meta) {
         $label = ($id <= 4 && $type !== 0) ? epm_prog_clean($formData["progkey_{$id}_label"] ?? '') : '';
 
         $has_extra = ($value !== '' || $label !== '' || ($hist !== '' && $hist !== '0') || ($line !== '' && $line !== '1'));
-
-        // Fields that were in use under the previously-saved type but are dropped
-        // by the type being saved now (e.g. a Speed Dial's line/value when the key
-        // is put back to N/A, or switched to a type that doesn't use them) need an
-        // explicit %NULL% - see epm_prog_key_null_fields().
-        $null_fields = epm_prog_key_null_fields($id, $type, $formData, $meta);
-
-        // If this key was already non-default when the form was loaded (i.e. a prior
-        // save already pushed a custom value to the phone) and the admin has now put
-        // it back to the factory function, we still have to write the default
-        // explicitly - Yealink templates are overrides, not full state, so a phone
-        // that already has a custom value keeps it forever if the parameter is simply
-        // left out of the next config. Once written back to default once, it drops
-        // out of the "was custom" snapshot on the next load and goes back to being
-        // omitted normally.
-        $was_custom = (($formData["progkey_{$id}_wascustom"] ?? '') === '1');
-        if ($type === $default && !$has_extra && !$was_custom && empty($null_fields)) { continue; }
+        if ($type === $default && !$has_extra) { continue; }
 
         if ($out === '') {
             $out .= "################################################\n";
@@ -1323,26 +1240,10 @@ function epm_build_prog_keys_block(array $formData, array $meta) {
             $out .= "################################################\n\n";
         }
         $out .= "programablekey.{$id}.type = {$type}\n";
-        if ($line !== '') {
-            $out .= "programablekey.{$id}.line = {$line}\n";
-        } elseif (in_array('line', $null_fields, true)) {
-            $out .= "programablekey.{$id}.line = %NULL%\n";
-        }
-        if ($value !== '') {
-            $out .= "programablekey.{$id}.value = {$value}\n";
-        } elseif (in_array('value', $null_fields, true)) {
-            $out .= "programablekey.{$id}.value = %NULL%\n";
-        }
-        if ($hist !== '' && $hist !== '0') {
-            $out .= "programablekey.{$id}.history_type = {$hist}\n";
-        } elseif (in_array('hist', $null_fields, true)) {
-            $out .= "programablekey.{$id}.history_type = %NULL%\n";
-        }
-        if ($label !== '') {
-            $out .= "programablekey.{$id}.label = {$label}\n";
-        } elseif (in_array('label', $null_fields, true)) {
-            $out .= "programablekey.{$id}.label = %NULL%\n";
-        }
+        if ($line !== '')  { $out .= "programablekey.{$id}.line = {$line}\n"; }
+        if ($value !== '') { $out .= "programablekey.{$id}.value = {$value}\n"; }
+        if ($hist !== '' && $hist !== '0') { $out .= "programablekey.{$id}.history_type = {$hist}\n"; }
+        if ($label !== '') { $out .= "programablekey.{$id}.label = {$label}\n"; }
         $out .= "\n";
     }
     return $out;
@@ -2332,20 +2233,6 @@ foreach (array_keys($prog_key_names) as $pid) {
     $formData["progkey_{$pid}_value"] = "";
     $formData["progkey_{$pid}_label"] = "";
     $formData["progkey_{$pid}_hist"] = "0";
-    // Must be seeded here (even though it's not a real Yealink parameter) so the
-    // save handler's "foreach ($formData as $k => $v) { if (isset($_POST[$k])) }"
-    // whitelist below actually picks up progkey_{id}_wascustom from the submitted
-    // form - see epm_build_prog_keys_block() for what it's used for.
-    $formData["progkey_{$pid}_wascustom"] = "";
-    // Snapshot of the type/line/value/label/hist that were already in effect when
-    // the popout was rendered (before the admin touches anything). Also just
-    // seeded here so the whitelist loop below picks it up as a hidden field - see
-    // epm_prog_key_null_fields() for what it's used for.
-    $formData["progkey_{$pid}_prevtype"] = (string)$prog_key_defaults[$pid];
-    $formData["progkey_{$pid}_prevline"] = "1";
-    $formData["progkey_{$pid}_prevvalue"] = "";
-    $formData["progkey_{$pid}_prevlabel"] = "";
-    $formData["progkey_{$pid}_prevhist"] = "0";
 }
 
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
@@ -2729,14 +2616,6 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
                 $pk_id = (int)$m[1];
                 $pk_field = strtolower($m[2]);
                 if ($pk_field === 'history_type') { $pk_field = 'hist'; }
-                // A prior save may have written %NULL% to clear a field that the
-                // key's type no longer uses (see epm_prog_key_null_fields()) -
-                // read it back as the field's normal "unset" value rather than
-                // the literal string, so it doesn't resurface if the admin picks
-                // a type that uses this field again.
-                if (strcasecmp($v, '%NULL%') === 0) {
-                    $v = ($pk_field === 'line') ? '1' : (($pk_field === 'hist') ? '0' : '');
-                }
                 $formData["progkey_{$pk_id}_{$pk_field}"] = $v;
                 if ($pk_field === 'type') { $prog_seen[$pk_id] = true; }
                 $is_parsed_tpl = true;
@@ -2775,14 +2654,6 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
             if (empty($prog_seen[$pid])) {
                 $formData["progkey_{$pid}_type"] = (string)epm_prog_key_default($formData['phone_model'], $pid, $prog_meta);
             }
-            // Snapshot what's actually in effect now (just loaded from this template
-            // file) as the "previous" state for the next save - see
-            // epm_prog_key_null_fields().
-            $formData["progkey_{$pid}_prevtype"]  = $formData["progkey_{$pid}_type"];
-            $formData["progkey_{$pid}_prevline"]  = $formData["progkey_{$pid}_line"] ?? '1';
-            $formData["progkey_{$pid}_prevvalue"] = $formData["progkey_{$pid}_value"] ?? '';
-            $formData["progkey_{$pid}_prevlabel"] = $formData["progkey_{$pid}_label"] ?? '';
-            $formData["progkey_{$pid}_prevhist"]  = $formData["progkey_{$pid}_hist"] ?? '0';
         }
 
         $formData['custom_inputs'] = implode("\n", $unparsed_tpl);

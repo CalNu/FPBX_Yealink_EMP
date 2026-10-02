@@ -228,6 +228,38 @@ function yealink_epm_apply_redirect_port($host_string, $sysadmin_redirect) {
     return $sysadmin_redirect ? "{$bare}:83" : $bare;
 }
 
+// URL of an empty tarball the phone is pointed at when its VPN is turned off. The running
+// phone re-reads openvpn.url from its next config, downloads the empty archive and stops
+// trying to reach the VPN - no reboot needed, and no more connection attempts in the log.
+function yealink_epm_fake_vpn_url($server_ip, $sysadmin_redirect) {
+    return "http://" . yealink_epm_apply_redirect_port($server_ip, $sysadmin_redirect) . "/PhoneSettings/fakekeys/null.tar";
+}
+
+// Is TFTP available on this box? 'running' (something listens on UDP 69), 'installed'
+// (server files exist but nothing is listening) or 'missing'.
+function epm_tftp_status() {
+    $readable = false;
+    foreach (['/proc/net/udp', '/proc/net/udp6'] as $f) {
+        $rows = @file($f, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if (!$rows) { continue; }
+        $readable = true;
+        foreach (array_slice($rows, 1) as $r) {
+            $cols = preg_split('/\s+/', trim($r));
+            if (isset($cols[1]) && preg_match('/:0045$/i', $cols[1])) { return 'running'; }
+        }
+    }
+    if (!$readable && function_exists('shell_exec')) {
+        $ss = @shell_exec('ss -lun 2>/dev/null');
+        if (is_string($ss) && preg_match('/[:.]69\s/', $ss)) { return 'running'; }
+    }
+    foreach (['/usr/sbin/in.tftpd', '/usr/libexec/tftpd', '/usr/sbin/tftpd', '/etc/default/tftpd-hpa',
+              '/lib/systemd/system/tftpd-hpa.service', '/usr/lib/systemd/system/tftp.socket',
+              '/usr/lib/systemd/system/tftp.service', '/etc/xinetd.d/tftp'] as $p) {
+        if (file_exists($p)) { return 'installed'; }
+    }
+    return 'missing';
+}
+
 $raw_host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_ADDR'] ?? '';
 if (strpos($raw_host, ':') !== false) {
     $raw_host = explode(':', $raw_host)[0];
@@ -696,13 +728,68 @@ function sendSipNotify($ext_or_mac, $event_type = 'check-sync', $phone_ip = '', 
     return true;
 }
 
-function buildDistinctiveRingtoneConfigBlock($active_ringtones = []) {
+// First ringer index available to custom (uploaded) ringtones. Custom ringtones are numbered
+// after the phone's factory ringtones (RingN files + Silent + Splash), so the starting index
+// is (factory count + 1) and depends on the model.
+//   VERIFIED on hardware (web UI ring dropdown): T28P = Ring1-5 + Silent + Splash = 7,
+//                                                 T48S = Ring1-13 + Silent + Splash = 15.
+//   NOT YET VERIFIED: T19/T21/T23/T27/T29 use 10 (Ring1-8 + Silent + Splash, per Yealink's
+//   admin guide). These are only used if a model is added to $epm_ringer_index_models in
+//   epm_ringer_by_name(); today only the T28P is numbered, everything else uses the filename.
+// Count on a phone: in the web UI ring dropdown, factory entries are the ones whose value
+// starts with "Resource:" (RingN.wav, Silent.wav, Splash.wav).
+if (!function_exists('epm_builtin_ringer_count')) {
+    function epm_builtin_ringer_count($model) {
+        $m = preg_replace('/^SIP-/', '', strtoupper(trim((string)$model)));
+        $counts = [
+            'T28P' => 7,
+            'T19P' => 10, 'T21P' => 10, 'T23G' => 10, 'T27G' => 10, 'T29G' => 10,
+            'T48S' => 15,
+        ];
+        if ($m === '' || $m === 'MANUAL' || $m === 'YEALINK') { return 7; }
+        return $counts[$m] ?? 15;    // every other model: assume the T48S layout
+    }
+}
+if (!function_exists('epm_first_custom_ringer_index')) {
+    function epm_first_custom_ringer_index($model) {
+        return epm_builtin_ringer_count($model) + 1;
+    }
+}
+
+// The ringtone block's marker comments are generated, never user content. Drop them so they
+// can't leak into (and accumulate in) Template Custom Key / Value Additions.
+if (!function_exists('epm_is_ringtone_marker_line')) {
+    function epm_is_ringtone_marker_line($line) {
+        return strpos($line, '######## DISTINCTIVE RINGTONE & ALERT INFO SETUP ########') !== false
+            || strpos($line, '######## END DISTINCTIVE RINGTONE SETUP ########') !== false;
+    }
+}
+
+// Write the ringer as the custom ringtone's filename (e.g. ring_att3.wav) instead of a numeric
+// index. Set EPM_RINGER_BY_NAME to false to go back to numeric indexes for every model, or list
+// any model that does not honour filenames in $epm_ringer_index_models to keep it on indexes.
+if (!defined('EPM_RINGER_BY_NAME')) { define('EPM_RINGER_BY_NAME', true); }
+if (!function_exists('epm_ringer_by_name')) {
+    function epm_ringer_by_name($model) {
+        if (!EPM_RINGER_BY_NAME) { return false; }
+        $m = strtoupper(trim((string)$model));
+        $m = preg_replace('/^SIP-/', '', $m);
+        // Only the T28P is known for sure (7 built-in ringtones -> numeric index starting at 8).
+        // Its legacy firmware ignores filenames, so it stays on numbers. Every other model,
+        // including the rest of the T2x series and the T19, writes the ringtone filename, which
+        // does not depend on knowing each model's factory ringtone count.
+        $epm_ringer_index_models = ['T28P'];
+        return !in_array($m, $epm_ringer_index_models, true);
+    }
+}
+
+function buildDistinctiveRingtoneConfigBlock($active_ringtones = [], $model = '') {
     if (empty($active_ringtones) || !is_array($active_ringtones)) {
         return "";
     }
 
     $ring_files = array_values(array_unique($active_ringtones));
-    sort($ring_files, SORT_STRING);
+    sort($ring_files, SORT_STRING | SORT_FLAG_CASE);
 
     $cfg = "######## DISTINCTIVE RINGTONE & ALERT INFO SETUP ########\n";
     $cfg .= "features.alert_info_tone = 1\n";
@@ -710,18 +797,22 @@ function buildDistinctiveRingtoneConfigBlock($active_ringtones = []) {
     $cfg .= "account.1.alert_info_url_enable = 1\n";
     $cfg .= "distinctive_ring_tones.alert_info.enable = 1\n\n";
 
-    $ringer_index = 8;
+    $ringer_index = epm_first_custom_ringer_index($model);
     $max_slots = min(count($ring_files), 10);
 
     for ($r_idx = 1; $r_idx <= $max_slots; $r_idx++) {
         $r_file = $ring_files[$r_idx - 1];
         $text_name = pathinfo($r_file, PATHINFO_FILENAME);
 
+        // By filename (default) the phone resolves the custom ringtone itself, so the result does
+        // not depend on the model's factory ringtone count or on how it orders custom files.
+        $ringer_val = epm_ringer_by_name($model) ? $r_file : $ringer_index;
+
         $cfg .= "distinctive_ring_tones.alert_info.{$r_idx}.text = {$text_name}\n";
-        $cfg .= "distinctive_ring_tones.alert_info.{$r_idx}.ringer = {$ringer_index}\n";
+        $cfg .= "distinctive_ring_tones.alert_info.{$r_idx}.ringer = {$ringer_val}\n";
 
         $cfg .= "account.1.alert_info_text.{$r_idx} = {$text_name}\n";
-        $cfg .= "account.1.alert_info_ringer.{$r_idx} = {$ringer_index}\n";
+        $cfg .= "account.1.alert_info_ringer.{$r_idx} = {$ringer_val}\n";
 
         $ringer_index++;
     }
@@ -771,6 +862,8 @@ function rebuildDevicesForTemplate($tpl_filename, $tftp_dir, $template_dir, $sav
                 } else {
                     $base_content = $file_content;
                 }
+                $dev_overrides_text = epm_extract_device_overrides($file_content);
+                $base_content = epm_strip_device_overrides($base_content);
 
                 if (($pos_flush = strpos($base_content, '######## ONE-TIME RINGTONE FLASH CLEAR ########')) !== false) {
                     $base_content = substr($base_content, 0, $pos_flush);
@@ -779,6 +872,20 @@ function rebuildDevicesForTemplate($tpl_filename, $tftp_dir, $template_dir, $sav
                 $tpl_content = file_get_contents($tpl_path);
                 $tpl_content = preg_replace('/^account\.1\.sip_server.*$/m', '', $tpl_content);
                 $tpl_content = preg_replace('/^#!version:.*$/m', '', $tpl_content);
+
+                // Re-emit the device's SIP server lines in the naming the template's phone model needs
+                // (so a template/model change also switches legacy <-> current parameter names).
+                if (preg_match('/^account\.1\.(?:sip_server_host|sip_server\.1\.address|sip_server)\s*=\s*(\S+)/mi', $base_content, $hm)) {
+                    $rb_host = $hm[1];
+                    $rb_port = '5060';
+                    if (preg_match('/^account\.1\.(?:sip_server_port|sip_server\.1\.port)\s*=\s*(\d+)/mi', $base_content, $pm2)) { $rb_port = $pm2[1]; }
+                    $rb_lines = implode("\n", epm_sip_server_lines(epm_template_phone_model($tpl_path), $rb_host, $rb_port));
+                    $first = true;
+                    $base_content = preg_replace_callback('/^account\.1\.sip_server[^\n]*\n?/mi', function ($mm) use (&$first, $rb_lines) {
+                        if ($first) { $first = false; return $rb_lines . "\n"; }
+                        return '';
+                    }, $base_content);
+                }
 
                 if ($append_flush) {
                     $tpl_content = preg_replace('/######## DISTINCTIVE RINGTONE & ALERT INFO SETUP ########.*?######## END DISTINCTIVE RINGTONE SETUP ########/s', '', $tpl_content);
@@ -803,6 +910,7 @@ function rebuildDevicesForTemplate($tpl_filename, $tftp_dir, $template_dir, $sav
                 }
                 
                 $final_cfg = rtrim($base_content) . "\n\n##### INHERITED TEMPLATE SETTINGS ({$tpl_filename}) #####\n" . $tpl_content;
+                $final_cfg .= epm_wrap_device_overrides($dev_overrides_text);
 
                 @file_put_contents($cf, $final_cfg);
                 @chown($cf, 'asterisk');
@@ -816,6 +924,97 @@ function rebuildDevicesForTemplate($tpl_filename, $tftp_dir, $template_dir, $sav
         }
     }
     return $updated_count;
+}
+
+// SIP server parameter names differ between firmware generations.
+//   legacy (SIP-T28P, V7x): account.1.sip_server_host / account.1.sip_server_port
+//   current (V81+):         account.1.sip_server.1.address / account.1.sip_server.1.port
+// An unknown / generic model gets both sets (phones ignore parameters they don't know).
+if (!function_exists('epm_sip_generation')) {
+    function epm_sip_generation($model) {
+        $m = strtoupper(trim((string)$model));
+        $m = preg_replace('/^SIP-/', '', $m);
+        if ($m === '' || $m === 'MANUAL' || $m === 'YEALINK') { return 'both'; }
+        return in_array($m, ['T28P'], true) ? 'legacy' : 'modern';
+    }
+}
+if (!function_exists('epm_sip_server_lines')) {
+    function epm_sip_server_lines($model, $host, $port) {
+        $gen = epm_sip_generation($model);
+        $lines = [];
+        if ($gen === 'legacy' || $gen === 'both') {
+            $lines[] = "account.1.sip_server = {$host}";
+            $lines[] = "account.1.sip_server_host = {$host}";
+            $lines[] = "account.1.sip_server_port = {$port}";
+        }
+        if ($gen === 'modern' || $gen === 'both') {
+            $lines[] = "account.1.sip_server.1.address = {$host}";
+            $lines[] = "account.1.sip_server.1.port = {$port}";
+        }
+        return $lines;
+    }
+}
+if (!function_exists('epm_template_phone_model')) {
+    function epm_template_phone_model($path) {
+        if (empty($path) || !is_file($path)) { return ''; }
+        $fh = @fopen($path, 'r');
+        if (!$fh) { return ''; }
+        $model = '';
+        for ($i = 0; $i < 12 && ($ln = fgets($fh)) !== false; $i++) {
+            if (preg_match('/^#\s*Phone\s*Model\s*:\s*(.+)$/i', trim($ln), $m)) { $model = trim($m[1]); break; }
+        }
+        fclose($fh);
+        return $model;
+    }
+}
+
+// Firmware generations differ in how the auto-provisioning parameters are named.
+// Legacy (V7x/V8x era, e.g. SIP-T28P and the "Global Legacy Base" y000000000000.cfg):
+//   auto_provision.mode / auto_provision.weekly.* / auto_provision.server.*
+// Current firmware: static.auto_provision.* with separate power_on / repeat / weekly switches.
+if (!function_exists('epm_autop_is_legacy_basename')) {
+    function epm_autop_is_legacy_basename($basename) {
+        return in_array(strtolower((string)$basename), ['y000000000000'], true);
+    }
+}
+if (!function_exists('epm_build_autop_block')) {
+    function epm_build_autop_block($legacy, $p) {
+        $mode = (string)$p['mode'];
+        $b = '';
+        if ($legacy) {
+            $b .= "auto_provision.mode = {$mode}\n";
+            $b .= "auto_provision.reboot_force.enable = 0\n";
+            $b .= "auto_provision.weekly.enable = {$p['weekly']}\n";
+            $b .= "auto_provision.weekly.begin_time = {$p['begin']}\n";
+            $b .= "auto_provision.weekly.end_time = {$p['end']}\n";
+            $b .= "auto_provision.weekly.dayofweek = {$p['dow']}\n";
+            $b .= "auto_provision.server.url = {$p['url']}\n";
+            $b .= "auto_provision.server.username = {$p['user']}\n";
+            $b .= "auto_provision.server.password = {$p['pass']}\n";
+            $b .= "auto_provision.dhcp_option.enable = {$p['dhcp']}\n\n";
+            return $b;
+        }
+        // Mode labels used by the UI: 1 Power on, 4 Repeatedly, 5 Weekly,
+        // 6 Power on + Repeatedly, 7 Power on + Weekly, 0 Disabled.
+        $power_on = in_array($mode, ['1', '6', '7'], true) ? '1' : '0';
+        $repeat   = in_array($mode, ['4', '6'], true) ? '1' : '0';
+        $weekly   = (in_array($mode, ['5', '7'], true) && (string)$p['weekly'] === '1') ? '1' : '0';
+        $b .= "static.auto_provision.power_on = {$power_on}\n";
+        $b .= "static.auto_provision.repeat.enable = {$repeat}\n";
+        if ($repeat === '1') {
+            $b .= "static.auto_provision.repeat.minutes = 1440\n";
+        }
+        $b .= "static.auto_provision.weekly.enable = {$weekly}\n";
+        $b .= "static.auto_provision.weekly.begin_time = {$p['begin']}\n";
+        $b .= "static.auto_provision.weekly.end_time = {$p['end']}\n";
+        $b .= "static.auto_provision.weekly.dayofweek = {$p['dow']}\n";
+        $b .= "static.auto_provision.reboot_force.enable = 0\n";
+        $b .= "static.auto_provision.server.url = {$p['url']}\n";
+        $b .= "static.auto_provision.server.username = {$p['user']}\n";
+        $b .= "static.auto_provision.server.password = {$p['pass']}\n";
+        $b .= "static.auto_provision.dhcp_option.enable = {$p['dhcp']}\n\n";
+        return $b;
+    }
 }
 
 function generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_target, $tftp_dir, $sysadmin_redirect) {
@@ -861,16 +1060,7 @@ function generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_ta
     $cfg .= "phone_setting.zero_touch_enable = 1\n";
     $cfg .= "action_uri.enable = 1\n";
     $cfg .= "features.action_uri_limit_ip = any\n\n";
-    $cfg .= "auto_provision.mode = {$auto_prov_mode}\n";
-    $cfg .= "auto_provision.reboot_force.enable = 0\n";
-    $cfg .= "auto_provision.weekly.enable = {$auto_prov_weekly}\n";
-    $cfg .= "auto_provision.weekly.begin_time = {$auto_prov_begin}\n";
-    $cfg .= "auto_provision.weekly.end_time = {$auto_prov_end}\n";
-    $cfg .= "auto_provision.weekly.dayofweek = {$auto_prov_dow}\n";
-    $cfg .= "auto_provision.server.url = http://{$server_ip_target}\n";
-    $cfg .= "auto_provision.server.username = {$auto_prov_user}\n";
-    $cfg .= "auto_provision.server.password = {$auto_prov_pass}\n";
-    $cfg .= "auto_provision.dhcp_option.enable = {$auto_prov_dhcp}\n\n";
+    $cfg .= "@@EPM_AUTOP_BLOCK@@\n";
     $cfg .= "sip.use_out_bound_in_dialog = {$sip_outbound}\n";
     $cfg .= "transfer.blind_tran_on_hook_enable = {$transfer_blind}\n";
     $cfg .= "transfer.on_hook_trans_enable = {$transfer_onhook}\n";
@@ -882,13 +1072,14 @@ function generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_ta
     $cfg .= "local_time.time_format = {$time_fmt}\n";
     $cfg .= "local_time.ntp_server1 = {$ntp1_target}\n";
     $cfg .= "local_time.ntp_server2 = {$ntp2_target}\n";
-    $cfg .= "phone_setting.inter_digit_time = {$dial_timeout}\n\n";
+    $cfg .= "phone_setting.dialnow_delay = {$dial_timeout}\n\n";
 
     $cfg .= "######## My DIALPLAN ########\n\n";
     $item_idx = 1;
     for ($d = 1; $d <= 50; $d++) {
         if (!empty($formData["dialnow_{$d}"])) {
-            $cfg .= "dialnow.item.{$item_idx} = {$formData["dialnow_{$d}"]}\n";
+            $cfg .= "dialplan.dialnow.rule.{$item_idx} = {$formData["dialnow_{$d}"]}\n";
+            $cfg .= "dialplan.dialnow.line_id.{$item_idx} = 0\n";
             $item_idx++;
         }
     }
@@ -899,11 +1090,19 @@ function generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_ta
         $cfg .= trim($formData['custom_inputs_global']) . "\n\n";
     }
 
+    $autop_params = [
+        'mode' => $auto_prov_mode, 'weekly' => $auto_prov_weekly, 'begin' => $auto_prov_begin,
+        'end' => $auto_prov_end, 'dow' => $auto_prov_dow, 'url' => "http://{$server_ip_target}",
+        'user' => $auto_prov_user, 'pass' => $auto_prov_pass, 'dhcp' => $auto_prov_dhcp,
+    ];
+    $cfg_modern = str_replace("@@EPM_AUTOP_BLOCK@@\n", epm_build_autop_block(false, $autop_params), $cfg);
+    $cfg_legacy = str_replace("@@EPM_AUTOP_BLOCK@@\n", epm_build_autop_block(true, $autop_params), $cfg);
     foreach (array_keys(yealinkGlobalCfgMap()) as $global_basename) {
-        @file_put_contents($tftp_dir . $global_basename . ".cfg", $cfg);
+        $out = epm_autop_is_legacy_basename($global_basename) ? $cfg_legacy : $cfg_modern;
+        @file_put_contents($tftp_dir . $global_basename . ".cfg", $out);
         @chown($tftp_dir . $global_basename . ".cfg", 'asterisk');
     }
-    return $cfg;
+    return $cfg_modern;
 }
 
 // ============================================================================
@@ -927,14 +1126,14 @@ if (file_exists($global_cfg_file)) {
         $temp_dialnow_file = [];
         foreach ($g_content as $g_line) {
             $g_line = trim($g_line);
-            if (preg_match('/^dialnow\.item\.(\d+)\s*=\s*(.+)$/i', $g_line, $gm)) {
+            if (preg_match('/^(?:dialplan\.dialnow\.rule|dialnow\.item)\.(\d+)\s*=\s*(.+)$/i', $g_line, $gm)) {
                 $idx = (int)$gm[1];
                 $val = trim($gm[2]);
                 if ($val !== '') {
                     $temp_dialnow_file[$idx] = $val;
                 }
             }
-            if (preg_match('/^auto_provision\.server\.url\s*=\s*http:\/\/(.+)$/i', $g_line, $gm)) {
+            if (preg_match('/^(?:static\.)?auto_provision\.server\.url\s*=\s*http:\/\/(.+)$/i', $g_line, $gm)) {
                 // account.1.sip_server / sip_server_host are also derived from
                 // this value elsewhere, and SIP registration already has its
                 // own port field (account.1.sip_server_port) — it must never
@@ -962,7 +1161,7 @@ if (file_exists($global_cfg_file)) {
             if (preg_match('/^local_time\.ntp_server2\s*=\s*(.+)$/i', $g_line, $gm)) {
                 $saved_global_ntp_server2 = trim($gm[1]);
             }
-            if (preg_match('/^phone_setting\.inter_digit_time\s*=\s*(\d+)$/i', $g_line, $gm)) {
+            if (preg_match('/^phone_setting\.(?:dialnow_delay|inter_digit_time)\s*=\s*(\d+)$/i', $g_line, $gm)) {
                 $saved_global_dialnow_timeout = trim($gm[1]);
             }
         }
@@ -1109,7 +1308,7 @@ $prog_key_types = [
 // Which extra fields a key type actually uses (line, value, ext, hist).
 // Label is handled separately: only SoftKey 1-4 have an on-screen label.
 $prog_key_type_fields = [
-    2  => ['line', 'value'],
+    2  => ['line'],
     9  => ['line', 'value'],
     13 => ['line', 'value'],
     14 => ['line', 'value'],
@@ -1152,6 +1351,73 @@ function epm_prog_key_default($model, $id, array $meta) {
         return (int)$meta['overrides'][$model][$id];
     }
     return (int)($meta['defaults'][$id] ?? 0);
+}
+
+// True if the key's *currently loaded* form values (i.e. what's already saved in
+// the template / already been pushed to phones) differ from the factory default -
+// same test the popout's JS runs client-side (progKeyIsCustom). Used at render time
+// to snapshot "was this non-default before the admin touches anything in this edit",
+// so a later save that reverts the key back to default still knows to explicitly
+// write the default (instead of silently omitting the key) and actually overwrite
+// whatever non-default value is already sitting on the phone.
+function epm_prog_key_is_custom($id, $model, array $formData, array $meta) {
+    $type_raw = trim((string)($formData["progkey_{$id}_type"] ?? ''));
+    if ($type_raw === '' || !ctype_digit($type_raw)) { return false; }
+    $type = (int)$type_raw;
+    $default = epm_prog_key_default($model, $id, $meta);
+    if ($type !== $default) { return true; }
+
+    $fields = $meta['fields'][$type] ?? [];
+    if (in_array('value', $fields, true) && trim((string)($formData["progkey_{$id}_value"] ?? '')) !== '') { return true; }
+    if ($id <= 4 && $type !== 0 && trim((string)($formData["progkey_{$id}_label"] ?? '')) !== '') { return true; }
+    if (in_array('line', $fields, true)) {
+        $line = trim((string)($formData["progkey_{$id}_line"] ?? '1'));
+        if ($line !== '' && $line !== '1') { return true; }
+    }
+    if (in_array('hist', $fields, true)) {
+        $hist = trim((string)($formData["progkey_{$id}_hist"] ?? '0'));
+        if ($hist !== '' && $hist !== '0') { return true; }
+    }
+    return false;
+}
+
+// Which of this key's fields (line/value/hist/label) were meaningfully in effect
+// under the PREVIOUS type (the one already saved/pushed to the phone when this
+// edit started) but are no longer used by the type being saved now. Those need
+// an explicit %NULL% written for them - see the note in epm_build_prog_keys_block()
+// on why simply omitting a no-longer-used field isn't enough (Yealink templates
+// are overrides, not full state, so a stale value keeps overriding the phone
+// forever otherwise).
+function epm_prog_key_null_fields($id, $new_type, array $formData, array $meta) {
+    $prev_type_raw = trim((string)($formData["progkey_{$id}_prevtype"] ?? ''));
+    if ($prev_type_raw === '' || !ctype_digit($prev_type_raw)) { return []; }
+    $prev_type = (int)$prev_type_raw;
+    if ($prev_type === $new_type) { return []; }
+
+    $prev_fields = $meta['fields'][$prev_type] ?? [];
+    $new_fields  = $meta['fields'][$new_type] ?? [];
+    $null_fields = [];
+
+    // Line is always written whenever a type uses it (even at its default of "1"),
+    // so it always needs clearing when the new type drops it.
+    if (in_array('line', $prev_fields, true) && !in_array('line', $new_fields, true)) {
+        $null_fields[] = 'line';
+    }
+    if (in_array('hist', $prev_fields, true) && !in_array('hist', $new_fields, true)) {
+        $prev_hist = trim((string)($formData["progkey_{$id}_prevhist"] ?? '0'));
+        if ($prev_hist !== '' && $prev_hist !== '0') { $null_fields[] = 'hist'; }
+    }
+    if (in_array('value', $prev_fields, true) && !in_array('value', $new_fields, true)) {
+        $prev_value = trim((string)($formData["progkey_{$id}_prevvalue"] ?? ''));
+        if ($prev_value !== '') { $null_fields[] = 'value'; }
+    }
+    $prev_label_active = ($id <= 4 && $prev_type !== 0);
+    $new_label_active  = ($id <= 4 && $new_type !== 0);
+    if ($prev_label_active && !$new_label_active) {
+        $prev_label = trim((string)($formData["progkey_{$id}_prevlabel"] ?? ''));
+        if ($prev_label !== '') { $null_fields[] = 'label'; }
+    }
+    return $null_fields;
 }
 
 function epm_prog_clean($s) {
@@ -1232,7 +1498,23 @@ function epm_build_prog_keys_block(array $formData, array $meta) {
         $label = ($id <= 4 && $type !== 0) ? epm_prog_clean($formData["progkey_{$id}_label"] ?? '') : '';
 
         $has_extra = ($value !== '' || $label !== '' || ($hist !== '' && $hist !== '0') || ($line !== '' && $line !== '1'));
-        if ($type === $default && !$has_extra) { continue; }
+
+        // Fields that were in use under the previously-saved type but are dropped
+        // by the type being saved now (e.g. a Speed Dial's line/value when the key
+        // is put back to N/A, or switched to a type that doesn't use them) need an
+        // explicit %NULL% - see epm_prog_key_null_fields().
+        $null_fields = epm_prog_key_null_fields($id, $type, $formData, $meta);
+
+        // If this key was already non-default when the form was loaded (i.e. a prior
+        // save already pushed a custom value to the phone) and the admin has now put
+        // it back to the factory function, we still have to write the default
+        // explicitly - Yealink templates are overrides, not full state, so a phone
+        // that already has a custom value keeps it forever if the parameter is simply
+        // left out of the next config. Once written back to default once, it drops
+        // out of the "was custom" snapshot on the next load and goes back to being
+        // omitted normally.
+        $was_custom = (($formData["progkey_{$id}_wascustom"] ?? '') === '1');
+        if ($type === $default && !$has_extra && !$was_custom && empty($null_fields)) { continue; }
 
         if ($out === '') {
             $out .= "################################################\n";
@@ -1240,10 +1522,26 @@ function epm_build_prog_keys_block(array $formData, array $meta) {
             $out .= "################################################\n\n";
         }
         $out .= "programablekey.{$id}.type = {$type}\n";
-        if ($line !== '')  { $out .= "programablekey.{$id}.line = {$line}\n"; }
-        if ($value !== '') { $out .= "programablekey.{$id}.value = {$value}\n"; }
-        if ($hist !== '' && $hist !== '0') { $out .= "programablekey.{$id}.history_type = {$hist}\n"; }
-        if ($label !== '') { $out .= "programablekey.{$id}.label = {$label}\n"; }
+        if ($line !== '') {
+            $out .= "programablekey.{$id}.line = {$line}\n";
+        } elseif (in_array('line', $null_fields, true)) {
+            $out .= "programablekey.{$id}.line = %NULL%\n";
+        }
+        if ($value !== '') {
+            $out .= "programablekey.{$id}.value = {$value}\n";
+        } elseif (in_array('value', $null_fields, true)) {
+            $out .= "programablekey.{$id}.value = %NULL%\n";
+        }
+        if ($hist !== '' && $hist !== '0') {
+            $out .= "programablekey.{$id}.history_type = {$hist}\n";
+        } elseif (in_array('hist', $null_fields, true)) {
+            $out .= "programablekey.{$id}.history_type = %NULL%\n";
+        }
+        if ($label !== '') {
+            $out .= "programablekey.{$id}.label = {$label}\n";
+        } elseif (in_array('label', $null_fields, true)) {
+            $out .= "programablekey.{$id}.label = %NULL%\n";
+        }
         $out .= "\n";
     }
     return $out;
@@ -1255,6 +1553,358 @@ foreach (array_keys($prog_key_models) as $pm_name) {
     foreach (array_keys($prog_key_names) as $pm_id) {
         $prog_key_model_defaults[$pm_name][$pm_id] = epm_prog_key_default($pm_name, $pm_id, $prog_meta);
     }
+}
+
+// ============================================================================
+// PER-DEVICE OVERRIDES
+// A device .cfg is: device lines + inherited template + (optional) override block.
+// The block is written LAST so its values win over the template, and every rebuild
+// copies it across untouched. It is always regenerated as a diff against the
+// template, so putting a setting back to the template's value removes the override.
+// ============================================================================
+function epm_ov_begin_marker() { return '##### DEVICE OVERRIDES #####'; }
+function epm_ov_end_marker()   { return '##### END DEVICE OVERRIDES #####'; }
+
+function epm_split_device_overrides($content) {
+    $content = (string)$content;
+    $b = strpos($content, epm_ov_begin_marker());
+    if ($b === false) { return [$content, '']; }
+    $baseline = substr($content, 0, $b);
+    $rest = substr($content, $b + strlen(epm_ov_begin_marker()));
+    $e = strpos($rest, epm_ov_end_marker());
+    $ov = ($e === false) ? $rest : substr($rest, 0, $e);
+    return [$baseline, trim($ov, "\r\n")];
+}
+function epm_extract_device_overrides($content) { $parts = epm_split_device_overrides($content); return $parts[1]; }
+function epm_strip_device_overrides($content)   { $parts = epm_split_device_overrides($content); return $parts[0]; }
+function epm_wrap_device_overrides($text) {
+    $text = trim((string)$text);
+    if ($text === '') { return ''; }
+    return "\n\n" . epm_ov_begin_marker() . "\n" . $text . "\n" . epm_ov_end_marker() . "\n";
+}
+
+function epm_parse_cfg_map($text) {
+    $map = [];
+    foreach (preg_split('/\R/', (string)$text) as $l) {
+        $l = trim($l);
+        if ($l === '' || $l[0] === '#') { continue; }
+        if (preg_match('/^([A-Za-z0-9_.\-]+)\s*=\s*(.*)$/', $l, $m)) {
+            $v = trim($m[2]);
+            $map[strtolower($m[1])] = ($v === '%NULL%') ? '' : $v;
+        }
+    }
+    return $map;
+}
+
+function epm_ov_clean($s, $max = 120) {
+    $s = preg_replace('/[\x00-\x1F\x7F]+/', ' ', (string)$s);
+    return trim(substr($s, 0, $max));
+}
+
+// Keys the Edit window manages itself; anything else in the override block goes to the custom box.
+function epm_ov_is_managed_key($k) {
+    return (bool)preg_match('/^(features\.(voice_mail|missed_call|forward_call|text_message)_popup\.enable|account\.1\.ringtone\.ring_type|ringtone\.url|linekey\.\d+\.(line|value|pickup_value|type|label)|memorykey\.\d+\.(line|value|pickup_value|type|label)|expansion_module\.\d+\.key\.\d+\.(line|value|pickup_value|type|label)|programablekey\.\d+\.(type|line|value|label|history_type))$/i', $k);
+}
+
+function epm_ov_model_key($content, array $model_keys) {
+    // A device .cfg has its own "# Phone Model: Yealink" line first and the inherited template's
+    // real model after it, so walk the matches from the last one back.
+    $matches = [];
+    preg_match_all('/^#\s*Phone\s*Model\s*:\s*(.+)$/im', (string)$content, $matches);
+    $best = 'manual';
+    foreach (array_reverse($matches[1] ?? []) as $cand) {
+        $raw = strtoupper(trim($cand));
+        $best_len = 0;
+        $found = 'manual';
+        foreach (array_keys($model_keys) as $k) {
+            if ($k === 'manual') { continue; }
+            if (strpos($raw, strtoupper($k)) !== false && strlen($k) > $best_len) { $found = $k; $best_len = strlen($k); }
+        }
+        if ($found !== 'manual') { $best = $found; break; }
+    }
+    return $best;
+}
+
+// Key counts for the Edit window: the model's own counts, or - for the custom/manual model and
+// for anything the template uses beyond that - the highest key the template actually defines.
+function epm_ov_key_counts($model, array $spec, $baseline_text, $exp_size, $exp_count) {
+    $hl = 0; $hm = 0; $mm = [];
+    if (preg_match_all('/^\s*linekey\.(\d+)\./im', (string)$baseline_text, $mm)) { $hl = max(array_map('intval', $mm[1])); }
+    $mm = [];
+    if (preg_match_all('/^\s*memorykey\.(\d+)\./im', (string)$baseline_text, $mm)) { $hm = max(array_map('intval', $mm[1])); }
+    $linekeys = max((int)($spec['linekeys'] ?? 1), $hl, 1);
+    $base_mem = ($model === 'manual') ? max((int)($spec['memkeys'] ?? 0), $hm) : (int)($spec['memkeys'] ?? 0);
+    return [$linekeys, $base_mem, $base_mem + ($exp_size * $exp_count)];
+}
+
+// One line key / memory key: write only the fields that differ from the template.
+function epm_ov_key_diff($prefix, array $new, array $base_map, array $defaults) {
+    $out = '';
+    $fields = ['line' => 'line', 'value' => 'value', 'pickup' => 'pickup_value', 'type' => 'type', 'label' => 'label'];
+    foreach ($fields as $f => $param) {
+        if (!array_key_exists($f, $new)) { continue; }
+        $n = epm_ov_clean($new[$f]);
+        $o = $base_map["{$prefix}.{$param}"] ?? ($defaults[$f] ?? '');
+        if ($n === $o) { continue; }
+        if (($f === 'type' || $f === 'line') && ($n === '' || !ctype_digit($n))) { continue; }
+        $out .= "{$prefix}.{$param} = " . ($n === '' ? '%NULL%' : $n) . "\n";
+    }
+    // A key the template never configured has no type/line lines to inherit, so when the
+    // override gives it content, write them explicitly instead of relying on assumed defaults.
+    if ($out !== '' && (epm_ov_clean($new['value'] ?? '') !== '' || epm_ov_clean($new['label'] ?? '') !== '')) {
+        foreach (['type', 'line'] as $f) {
+            $n = epm_ov_clean($new[$f] ?? '');
+            if ($n !== '' && ctype_digit($n) && !isset($base_map["{$prefix}.{$f}"]) && strpos($out, "{$prefix}.{$f} =") === false) {
+                $out .= "{$prefix}.{$f} = {$n}\n";
+            }
+        }
+    }
+    return $out;
+}
+
+function epm_ov_prog_norm($id, $type, $line, $value, $label, $hist, array $meta) {
+    $fields = $meta['fields'][(int)$type] ?? [];
+    return [
+        (int)$type,
+        in_array('line', $fields, true)  ? (string)$line  : '',
+        in_array('value', $fields, true) ? (string)$value : '',
+        ($id <= 4 && (int)$type !== 0)   ? (string)$label : '',
+        in_array('hist', $fields, true)  ? (string)$hist  : ''
+    ];
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'get_device_overrides' && !empty($_GET['mac'])) {
+    if (ob_get_length()) { ob_clean(); }
+    header('Content-Type: application/json');
+    $ov_mac = strtolower(preg_replace('/[^a-fA-F0-9]/', '', $_GET['mac']));
+    $ov_path = $tftp_dir . $ov_mac . '.cfg';
+    if (!is_file($ov_path)) {
+        http_response_code(404);
+        echo json_encode(['error' => "Configuration file [{$ov_mac}.cfg] not found."]);
+        exit;
+    }
+    $ov_content = file_get_contents($ov_path);
+    list($ov_base_text, $ov_text) = epm_split_device_overrides($ov_content);
+    $ov_base = epm_parse_cfg_map($ov_base_text);
+    $ov_eff  = array_merge($ov_base, epm_parse_cfg_map($ov_text));
+    $ov_model = epm_ov_model_key($ov_content, $yealink_model_keys);
+    $ov_spec  = $yealink_model_keys[$ov_model];
+
+    $ov_popups = [];
+    foreach (['voice_mail', 'missed_call', 'forward_call', 'text_message'] as $pp) {
+        $ov_popups[$pp] = (($ov_eff["features.{$pp}_popup.enable"] ?? '1') === '0') ? '0' : '1';
+    }
+
+    $ov_custom_files = array_values(array_filter(array_map('basename', glob($ringtone_dir . '*.*') ?: [])));
+    usort($ov_custom_files, 'strcasecmp');
+    $ov_builtin = [];
+    foreach ($builtin_ringtones as $rv => $rl) { $ov_builtin[] = [$rv, $rl]; }
+
+    $ov_keys = function ($prefix, $count) use ($ov_eff) {
+        $rows = [];
+        for ($i = 1; $i <= $count; $i++) {
+            $rows[] = [
+                'type'   => $ov_eff["{$prefix}.{$i}.type"] ?? ($i === 1 && $prefix === 'linekey' ? '15' : '16'),
+                'value'  => $ov_eff["{$prefix}.{$i}.value"] ?? '',
+                'label'  => $ov_eff["{$prefix}.{$i}.label"] ?? '',
+                'pickup' => $ov_eff["{$prefix}.{$i}.pickup_value"] ?? '',
+                'line'   => $ov_eff["{$prefix}.{$i}.line"] ?? '1',
+            ];
+        }
+        return $rows;
+    };
+
+    // Memory keys = the model's built-in ones plus the keys of the template's expansion module(s).
+    $ov_exp_model = 'none'; $ov_exp_count = 0;
+    if (preg_match('/^#\s*Expansion\s*Model\s*:\s*(.+)$/im', $ov_base_text, $em)) { $ov_exp_model = trim($em[1]); }
+    if (preg_match('/^#\s*Expansion\s*Count\s*:\s*(\d+)/im', $ov_base_text, $ec)) { $ov_exp_count = (int)$ec[1]; }
+    $ov_exp_size  = (int)($expansion_key_sizes[$ov_exp_model] ?? 0);
+    list($ov_linekey_count, $ov_base_mem, $ov_mem_total) = epm_ov_key_counts($ov_model, $ov_spec, $ov_base_text, $ov_exp_size, $ov_exp_count);
+    $ov_mem_rows = [];
+    for ($mi = 1; $mi <= $ov_mem_total; $mi++) {
+        list($mp) = epm_memkey_prefix($mi, $ov_base_mem, $ov_exp_size);
+        $ov_mem_rows[] = [
+            'type'   => $ov_eff["{$mp}.type"] ?? '16',
+            'value'  => $ov_eff["{$mp}.value"] ?? '',
+            'label'  => $ov_eff["{$mp}.label"] ?? '',
+            'pickup' => $ov_eff["{$mp}.pickup_value"] ?? '',
+            'line'   => $ov_eff["{$mp}.line"] ?? '1',
+        ];
+    }
+
+    $ov_prog = [];
+    $ov_prog_ids = $prog_key_models[$ov_model] ?? $prog_key_models['manual'];
+    foreach ($ov_prog_ids as $pid) {
+        $def = epm_prog_key_default($ov_model, $pid, $prog_meta);
+        $t = $ov_eff["programablekey.{$pid}.type"] ?? '';
+        $ov_prog[] = [
+            'id'    => $pid,
+            'name'  => $prog_key_names[$pid] ?? ("Key {$pid}"),
+            'type'  => ($t !== '' && ctype_digit($t)) ? $t : (string)$def,
+            'line'  => $ov_eff["programablekey.{$pid}.line"] ?? '1',
+            'value' => $ov_eff["programablekey.{$pid}.value"] ?? '',
+            'label' => $ov_eff["programablekey.{$pid}.label"] ?? '',
+            'hist'  => $ov_eff["programablekey.{$pid}.history_type"] ?? '0',
+        ];
+    }
+
+    $ov_custom_lines = [];
+    foreach (preg_split('/\R/', $ov_text) as $cl) {
+        $cl = trim($cl);
+        if ($cl === '' || $cl[0] === '#') { continue; }
+        if (preg_match('/^([A-Za-z0-9_.\-]+)\s*=/', $cl, $cm) && !epm_ov_is_managed_key($cm[1])) { $ov_custom_lines[] = $cl; }
+    }
+
+    echo json_encode([
+        'model'      => $ov_model,
+        'ext'        => $ov_eff['account.1.auth_name'] ?? ($ov_eff['account.1.user_name'] ?? ''),
+        'popups'     => $ov_popups,
+        'ringtone'   => $ov_eff['account.1.ringtone.ring_type'] ?? 'Common',
+        'ringtones'  => ['builtin' => $ov_builtin, 'custom' => $ov_custom_files],
+        'dss'        => $dss_key_types,
+        'maxLines'   => max(16, (int)($ov_spec['lines'] ?? 16)),
+        'linekeys'   => $ov_keys('linekey', $ov_linekey_count),
+        'memkeys'    => $ov_mem_rows,
+        'prog'       => $ov_prog,
+        'progTypes'  => $prog_key_types,
+        'progFields' => $prog_key_type_fields,
+        'custom'     => implode("\n", $ov_custom_lines),
+        'hasOverrides' => trim($ov_text) !== '',
+    ]);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_device_overrides']) && !empty($_POST['mac'])) {
+    if (ob_get_length()) { ob_clean(); }
+    header('Content-Type: application/json');
+    $ov_mac = strtolower(preg_replace('/[^a-fA-F0-9]/', '', $_POST['mac']));
+    $ov_path = $tftp_dir . $ov_mac . '.cfg';
+    $ov_in = json_decode((string)($_POST['payload'] ?? ''), true);
+    if (!is_file($ov_path) || !is_array($ov_in)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Config file or payload missing.']);
+        exit;
+    }
+    $ov_content = file_get_contents($ov_path);
+    list($ov_base_text, $ov_old_text) = epm_split_device_overrides($ov_content);
+    $ov_base  = epm_parse_cfg_map($ov_base_text);
+    $ov_model = epm_ov_model_key($ov_content, $yealink_model_keys);
+    $ov_spec  = $yealink_model_keys[$ov_model];
+    $ov_lines = '';
+
+    // Notifications
+    foreach (['voice_mail', 'missed_call', 'forward_call', 'text_message'] as $pp) {
+        if (!isset($ov_in['popups'][$pp])) { continue; }
+        $new = ($ov_in['popups'][$pp] === '0' || $ov_in['popups'][$pp] === 0) ? '0' : '1';
+        $old = (($ov_base["features.{$pp}_popup.enable"] ?? '1') === '0') ? '0' : '1';
+        if ($new !== $old) { $ov_lines .= "features.{$pp}_popup.enable = {$new}\n"; }
+    }
+
+    // Default account ringtone
+    if (isset($ov_in['ringtone'])) {
+        $rv = epm_ov_clean($ov_in['ringtone']);
+        $is_builtin = array_key_exists($rv, $builtin_ringtones);
+        $is_custom  = !$is_builtin && $rv === basename($rv) && $rv !== '' && is_file($ringtone_dir . $rv);
+        $old_rv = $ov_base['account.1.ringtone.ring_type'] ?? 'Common';
+        if (($is_builtin || $is_custom) && $rv !== $old_rv) {
+            $ov_lines .= "account.1.ringtone.ring_type = {$rv}\n";
+            if ($is_custom && !preg_match('#^ringtone\.url\s*=.*/ringtones/' . preg_quote($rv, '#') . '\s*$#mi', $ov_base_text)) {
+                if (preg_match('#^ringtone\.url\s*=\s*(\S+)/ringtones/#mi', $ov_base_text, $um)) {
+                    $ov_assets = $um[1];
+                } else {
+                    $ov_assets = "http://{$saved_global_server_ip}" . ((isset($sysadmin_redirect) && $sysadmin_redirect) ? ':83' : '') . '/PhoneSettings';
+                }
+                $ov_lines .= "ringtone.url = {$ov_assets}/ringtones/{$rv}\n";
+            }
+        }
+    }
+
+    $p_exp_model = 'none'; $p_exp_count = 0;
+    if (preg_match('/^#\s*Expansion\s*Model\s*:\s*(.+)$/im', $ov_base_text, $pem)) { $p_exp_model = trim($pem[1]); }
+    if (preg_match('/^#\s*Expansion\s*Count\s*:\s*(\d+)/im', $ov_base_text, $pec)) { $p_exp_count = (int)$pec[1]; }
+    $p_exp_size = (int)($expansion_key_sizes[$p_exp_model] ?? 0);
+    list($p_linekey_count, $p_base_mem, $p_mem_total) = epm_ov_key_counts($ov_model, $ov_spec, $ov_base_text, $p_exp_size, $p_exp_count);
+
+    // Line keys (key 1 is the account line and is never overridden)
+    if (!empty($ov_in['linekeys']) && is_array($ov_in['linekeys'])) {
+        foreach ($ov_in['linekeys'] as $row) {
+            $i = isset($row['idx']) ? (int)$row['idx'] : 0;
+            if ($i < 2 || $i > $p_linekey_count) { continue; }
+            if (isset($row['type']) && !array_key_exists((string)$row['type'], $dss_key_types)) { unset($row['type']); }
+            if (isset($row['line']) && (!ctype_digit((string)$row['line']) || (int)$row['line'] < 1 || (int)$row['line'] > 16)) { unset($row['line']); }
+            $ov_lines .= epm_ov_key_diff("linekey.{$i}", $row, $ov_base, ['type' => '16', 'line' => '1', 'value' => '', 'label' => '', 'pickup' => '']);
+        }
+    }
+
+    // Memory keys: built-in ones plus the template's expansion module keys
+    if (!empty($ov_in['memkeys']) && is_array($ov_in['memkeys'])) {
+        $m_exp_size = $p_exp_size; $m_base_mem = $p_base_mem; $m_total = $p_mem_total;
+        foreach ($ov_in['memkeys'] as $row) {
+            $i = isset($row['idx']) ? (int)$row['idx'] : 0;
+            if ($i < 1 || $i > $m_total) { continue; }
+            if (isset($row['type']) && !array_key_exists((string)$row['type'], $dss_key_types)) { unset($row['type']); }
+            if (isset($row['line']) && (!ctype_digit((string)$row['line']) || (int)$row['line'] < 1 || (int)$row['line'] > 16)) { unset($row['line']); }
+            list($m_prefix) = epm_memkey_prefix($i, $m_base_mem, $m_exp_size);
+            $ov_lines .= epm_ov_key_diff($m_prefix, $row, $ov_base, ['type' => '16', 'line' => '1', 'value' => '', 'label' => '', 'pickup' => '']);
+        }
+    }
+
+    // Programmable keys: reuse the template builder (incl. %NULL% handling) for the keys that changed
+    if (!empty($ov_in['progkeys']) && is_array($ov_in['progkeys'])) {
+        $allowed_ids = $prog_key_models[$ov_model] ?? $prog_key_models['manual'];
+        $fd = ['phone_model' => $ov_model];
+        foreach ($ov_in['progkeys'] as $row) {
+            $id = isset($row['idx']) ? (int)$row['idx'] : 0;
+            if (!in_array($id, $allowed_ids, true)) { continue; }
+            $nt = epm_prog_clean($row['type'] ?? '');
+            if ($nt === '' || !ctype_digit($nt) || !isset($prog_key_types[(int)$nt])) { continue; }
+            $def = epm_prog_key_default($ov_model, $id, $prog_meta);
+            $bt_raw = $ov_base["programablekey.{$id}.type"] ?? '';
+            $bt = ($bt_raw !== '' && ctype_digit($bt_raw)) ? (int)$bt_raw : $def;
+            $bl = $ov_base["programablekey.{$id}.line"] ?? '1';   if ($bl === '' || !ctype_digit($bl)) { $bl = '1'; }
+            $bv = $ov_base["programablekey.{$id}.value"] ?? '';
+            $bb = $ov_base["programablekey.{$id}.label"] ?? '';
+            $bh = $ov_base["programablekey.{$id}.history_type"] ?? '0'; if ($bh === '') { $bh = '0'; }
+            $nl = epm_prog_clean($row['line'] ?? '1');  if ($nl === '' || !ctype_digit($nl)) { $nl = '1'; }
+            $nv = epm_prog_clean($row['value'] ?? '');
+            $nb = epm_prog_clean($row['label'] ?? '');
+            $nh = (($row['hist'] ?? '0') === '1') ? '1' : '0';
+            if (epm_ov_prog_norm($id, $bt, $bl, $bv, $bb, $bh, $prog_meta) === epm_ov_prog_norm($id, (int)$nt, $nl, $nv, $nb, $nh, $prog_meta)) { continue; }
+            $fd["progkey_{$id}_type"] = $nt;
+            $fd["progkey_{$id}_line"] = $nl;
+            $fd["progkey_{$id}_value"] = $nv;
+            $fd["progkey_{$id}_label"] = $nb;
+            $fd["progkey_{$id}_hist"] = $nh;
+            $fd["progkey_{$id}_prevtype"] = (string)$bt;
+            $fd["progkey_{$id}_prevvalue"] = $bv;
+            $fd["progkey_{$id}_prevlabel"] = $bb;
+            $fd["progkey_{$id}_prevhist"] = $bh;
+            $fd["progkey_{$id}_wascustom"] = ($bt !== $def || $bv !== '' || $bb !== '' || $bl !== '1' || $bh !== '0') ? '1' : '0';
+        }
+        $ov_lines .= epm_build_prog_keys_block($fd, $prog_meta);
+    }
+
+    // Custom key / value additions
+    $ov_dropped = 0;
+    $ov_custom_out = '';
+    foreach (preg_split('/\R/', (string)($ov_in['custom'] ?? '')) as $cl) {
+        $cl = epm_ov_clean($cl, 400);
+        if ($cl === '' || $cl[0] === '#') { continue; }
+        if (preg_match('/^[A-Za-z0-9_.\-]+\s*=/', $cl)) { $ov_custom_out .= $cl . "\n"; } else { $ov_dropped++; }
+    }
+    $ov_lines .= $ov_custom_out;
+
+    $new_cfg = rtrim($ov_base_text) . "\n" . epm_wrap_device_overrides($ov_lines);
+    @file_put_contents($ov_path, $new_cfg);
+    @chown($ov_path, 'asterisk');
+
+    if (!empty($_POST['sync'])) {
+        $ov_ext = $ov_base['account.1.auth_name'] ?? ($ov_base['account.1.user_name'] ?? '');
+        if ($ov_ext !== '') { sendSipNotify($ov_ext, 'yealink-check-cfg', '', $saved_global_admin_pass); }
+    }
+
+    echo json_encode(['ok' => true, 'lines' => substr_count(trim($ov_lines), "\n") + ($ov_lines === '' ? 0 : 1), 'dropped' => $ov_dropped, 'synced' => !empty($_POST['sync'])]);
+    exit;
 }
 
 if (isset($db) && $db instanceof PDO) {
@@ -1309,8 +1959,11 @@ if (isset($pdo)) {
     }
 
     try {
+        // Only SIP / PJSIP extensions can register with a secret. Custom, DAHDI,
+        // IAX2 and virtual extensions have no row in `sip`, so exclude them.
         $stmt = $pdo->query("SELECT u.extension AS id, u.name AS display_name, s.data AS secret 
                             FROM users u 
+                            INNER JOIN devices d ON d.id = u.extension AND LOWER(d.tech) IN ('sip', 'pjsip') 
                             LEFT JOIN sip s ON u.extension = s.id AND s.keyword = 'secret' 
                             ORDER BY CAST(u.extension AS UNSIGNED) ASC");
         $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1319,6 +1972,7 @@ if (isset($pdo)) {
             $stmt = $pdo->query("SELECT d.id, d.description AS display_name, s.data AS secret 
                                 FROM devices d 
                                 LEFT JOIN sip s ON d.id = s.id AND s.keyword = 'secret' 
+                                WHERE LOWER(d.tech) IN ('sip', 'pjsip') 
                                 ORDER BY CAST(d.id AS UNSIGNED) ASC");
             $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
@@ -1505,8 +2159,10 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
             $clean_lines = array_filter($lines, function($l) {
                 return !preg_match('/^(openvpn\.|network\.vpn_enable)/i', trim($l));
             });
-            $clean_lines[] = "openvpn.url = ";
-            $clean_lines[] = "network.vpn_enable = 0";
+            // vpn_enable stays 1: the phone keeps the VPN feature on, fetches the empty tar and goes quiet
+            // without a reboot (a 0 here would only take effect after one).
+            $clean_lines[] = "openvpn.url = " . yealink_epm_fake_vpn_url($saved_global_server_ip, $sysadmin_redirect);
+            $clean_lines[] = "network.vpn_enable = 1";
             @file_put_contents($cfg_path, implode("\n", $clean_lines) . "\n");
             @chown($cfg_path, 'asterisk');
         }
@@ -1530,7 +2186,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['single_ringtone_ajax'
         $ext = strtolower(pathinfo($orig_name, PATHINFO_EXTENSION));
 
         if (in_array($ext, ['mp3', 'wav'])) {
-            $clean_filename = pathinfo($orig_name, PATHINFO_FILENAME) . '.wav';
+            // Lowercase so the phone's alphabetical slot order matches the order we compute.
+            $clean_filename = strtolower(pathinfo($orig_name, PATHINFO_FILENAME)) . '.wav';
             $target_path = $ringtone_dir . $clean_filename;
 
             exec('which ffmpeg 2>&1', $out_ff, $ret_ff);
@@ -1933,9 +2590,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'add_scanned_device') {
             $cfg_body .= "account.1.auth_name = {$scanned_ext}\n";
             $cfg_body .= "account.1.user_name = {$scanned_ext}\n";
             $cfg_body .= "account.1.password = {$ext_secret}\n";
-            $cfg_body .= "account.1.sip_server = {$saved_global_server_ip}\n";
-            $cfg_body .= "account.1.sip_server_host = {$saved_global_server_ip}\n";
-            $cfg_body .= "account.1.sip_server_port = {$default_sip_port}\n";
+            $scan_model = !empty($scanned_tpl) ? epm_template_phone_model($template_dir . $scanned_tpl) : '';
+            foreach (epm_sip_server_lines($scan_model, $saved_global_server_ip, $default_sip_port) as $sl) {
+                $cfg_body .= $sl . "\n";
+            }
             $cfg_body .= "account.1.port = {$default_sip_port}\n";
             $cfg_body .= "linekey.1.type = 15\n";
             $cfg_body .= "linekey.1.line = 1\n";
@@ -2141,7 +2799,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['flush_template_rington
 
             $updated_tpl_str = implode("\n", $clean_tpl_lines);
             if (!empty($posted_ringtones)) {
-                $updated_tpl_str = rtrim($updated_tpl_str) . "\n\n" . buildDistinctiveRingtoneConfigBlock($posted_ringtones);
+                $updated_tpl_str = rtrim($updated_tpl_str) . "\n\n" . buildDistinctiveRingtoneConfigBlock($posted_ringtones, epm_template_phone_model($tpl_path));
             }
 
             @file_put_contents($tpl_path, $updated_tpl_str);
@@ -2188,6 +2846,10 @@ $formData = [
     'dialnow_count' => count($outbound_patterns) ?: 1,
     'linekey_count' => $max_linekeys,
     'memkey_count' => $max_memkeys,
+    'popup_voice_mail' => '1',
+    'popup_missed_call' => '1',
+    'popup_forward_call' => '1',
+    'popup_text_message' => '1',
     'custom_inputs_global' => '',
     'custom_inputs' => '',
     'sip_use_out_bound_in_dialog' => '1',
@@ -2233,6 +2895,20 @@ foreach (array_keys($prog_key_names) as $pid) {
     $formData["progkey_{$pid}_value"] = "";
     $formData["progkey_{$pid}_label"] = "";
     $formData["progkey_{$pid}_hist"] = "0";
+    // Must be seeded here (even though it's not a real Yealink parameter) so the
+    // save handler's "foreach ($formData as $k => $v) { if (isset($_POST[$k])) }"
+    // whitelist below actually picks up progkey_{id}_wascustom from the submitted
+    // form - see epm_build_prog_keys_block() for what it's used for.
+    $formData["progkey_{$pid}_wascustom"] = "";
+    // Snapshot of the type/line/value/label/hist that were already in effect when
+    // the popout was rendered (before the admin touches anything). Also just
+    // seeded here so the whitelist loop below picks it up as a hidden field - see
+    // epm_prog_key_null_fields() for what it's used for.
+    $formData["progkey_{$pid}_prevtype"] = (string)$prog_key_defaults[$pid];
+    $formData["progkey_{$pid}_prevline"] = "1";
+    $formData["progkey_{$pid}_prevvalue"] = "";
+    $formData["progkey_{$pid}_prevlabel"] = "";
+    $formData["progkey_{$pid}_prevhist"] = "0";
 }
 
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
@@ -2251,7 +2927,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     if (!isset($_POST['uploaded_ringtones'])) {
         $formData['uploaded_ringtones'] = [];
     } else {
-        sort($formData['uploaded_ringtones'], SORT_STRING);
+        sort($formData['uploaded_ringtones'], SORT_STRING | SORT_FLAG_CASE);
         $formData['uploaded_ringtones'] = array_values(array_unique($formData['uploaded_ringtones']));
     }
 
@@ -2361,12 +3037,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     $generated_template_cfg .= "# Expansion Model: {$formData['exp_model']}\n";
     $generated_template_cfg .= "# Expansion Count: {$formData['exp_count']}\n\n";
 
-    $generated_template_cfg .= "account.1.sip_server = {$saved_global_server_ip}\n";
-    $generated_template_cfg .= "account.1.sip_server_host = {$saved_global_server_ip}\n";
-    $generated_template_cfg .= "account.1.sip_server_port = {$formData['sip_port']}\n";
+    foreach (epm_sip_server_lines($formData['phone_model'], $saved_global_server_ip, $formData['sip_port']) as $sl) {
+        $generated_template_cfg .= $sl . "\n";
+    }
     $generated_template_cfg .= "account.1.port = {$formData['sip_port']}\n";
     $generated_template_cfg .= "account.1.sip_listen_port = {$formData['sip_listen_port']}\n";
-    $generated_template_cfg .= "voice_mail.number.1 = {$formData['voicemail_number']}\n\n";
+    $generated_template_cfg .= "voice_mail.number.1 = {$formData['voicemail_number']}\n";
+    foreach (['voice_mail', 'missed_call', 'forward_call', 'text_message'] as $pp) {
+        $pv = (($formData["popup_{$pp}"] ?? '1') === '0') ? '0' : '1';
+        $generated_template_cfg .= "features.{$pp}_popup.enable = {$pv}\n";
+    }
+    $generated_template_cfg .= "\n";
 
     $acct_ring = $formData['account_ringtone'] ?? 'Common';
     $generated_template_cfg .= "account.1.ringtone.ring_type = {$acct_ring}\n";
@@ -2384,7 +3065,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
         $formData['uploaded_ringtones'] = $valid_ringtones;
 
         if (!empty($formData['uploaded_ringtones'])) {
-            sort($formData['uploaded_ringtones'], SORT_STRING);
+            sort($formData['uploaded_ringtones'], SORT_STRING | SORT_FLAG_CASE);
             $formData['uploaded_ringtones'] = array_values(array_unique($formData['uploaded_ringtones']));
 
             $generated_template_cfg .= "account.1.alert_info_url_enable = 1\n\n";
@@ -2403,7 +3084,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
         $generated_template_cfg .= "\n";
     }
 
-    $generated_template_cfg .= buildDistinctiveRingtoneConfigBlock($formData['uploaded_ringtones']);
+    $generated_template_cfg .= buildDistinctiveRingtoneConfigBlock($formData['uploaded_ringtones'], $formData['phone_model'] ?? '');
 
     $gen_base_mem = (int)($yealink_model_keys[$formData['phone_model']]['memkeys'] ?? 0);
     $gen_exp_size = (int)($expansion_key_sizes[$formData['exp_model']] ?? 0);
@@ -2415,8 +3096,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
         $generated_template_cfg .= "################################################\n";
         $generated_template_cfg .= "##         Expansion Module Wallpaper           ##\n";
         $generated_template_cfg .= "################################################\n\n";
-        $generated_template_cfg .= "wallpaper_upload.url = {$exp_wp_url}\n";
-        $generated_template_cfg .= "expansion_module.backgrounds = {$formData['exp_wallpaper_file']}\n\n";
+        // The phone screen and the expansion module choose their picture independently
+        // (phone_setting.backgrounds / expansion_module.backgrounds), so they may differ.
+        // wallpaper_upload.url is a single download URL, so:
+        //  - same file as the phone wallpaper: the phone block below downloads it for both;
+        //  - different file: this URL is written first and the phone's URL follows it.
+        $phone_uses_wp_url = !$is_logo_disabled && !$use_lcd_logo_url && $formData['logo_file'] !== 'system';
+        $same_as_phone = $phone_uses_wp_url && basename($logo_url) === $formData['exp_wallpaper_file'];
+        if (!$same_as_phone) {
+            $generated_template_cfg .= "wallpaper_upload.url = {$exp_wp_url}\n";
+        }
+        $generated_template_cfg .= "expansion_module.backgrounds = Config:{$formData['exp_wallpaper_file']}\n\n";
     }
 
     $has_linekeys = false;
@@ -2449,15 +3139,27 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
 
     $generated_template_cfg .= "phone_setting.lcd_logo.mode = {$lcd_logo_mode}\n";
     if ($is_logo_disabled) {
-        $generated_template_cfg .= "lcd_logo.url = \n";
-        $generated_template_cfg .= "phone_setting.background_image = \n\n";
+        // Nothing to push; blank lcd_logo.url is stripped by the cleanup pass below.
+        $generated_template_cfg .= "lcd_logo.url = \n\n";
     } elseif ($use_lcd_logo_url) {
+        // .dob logo (T28P etc.)
         $generated_template_cfg .= "lcd_logo.url = {$logo_url}\n\n";
+    } elseif ($formData['logo_file'] === 'system') {
+        $generated_template_cfg .= "phone_setting.backgrounds = Default:1.png\n\n";
     } else {
-        $generated_template_cfg .= "phone_setting.background_image = {$logo_url}\n\n";
+        // Color-screen wallpaper (jpg/png/bmp): wallpaper_upload.url tells the phone
+        // where to download the image; phone_setting.backgrounds selects it by filename.
+        $generated_template_cfg .= "wallpaper_upload.url = {$logo_url}\n";
+        $generated_template_cfg .= "phone_setting.backgrounds = Config:" . basename($logo_url) . "\n\n";
     }
 
     if (!empty($formData['custom_inputs'])) {
+        $formData['custom_inputs'] = implode("\n", array_filter(
+            preg_split('/\R/', $formData['custom_inputs']),
+            function ($l) { return !epm_is_ringtone_marker_line($l); }
+        ));
+    }
+    if (!empty(trim($formData['custom_inputs']))) {
         $generated_template_cfg .= "##### Template Custom Additions #####\n";
         $generated_template_cfg .= trim($formData['custom_inputs']) . "\n\n";
     }
@@ -2525,7 +3227,7 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
             }
 
             if ($is_custom_section) {
-                if ($t_line !== '') {
+                if ($t_line !== '' && !epm_is_ringtone_marker_line($t_line)) {
                     if (
                         strpos($t_line, 'distinctive_ring_tones.') !== 0 && 
                         strpos($t_line, 'account.1.alert_info_') !== 0 && 
@@ -2546,15 +3248,19 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
             if (strpos($t_line, '=') === false || strpos($t_line, '#') === 0) continue;
             list($k, $v) = array_map('trim', explode('=', $t_line, 2));
 
-            if ($k === 'auto_provision.server.url' || $k === 'security.user_password' || strpos($k, 'account.1.sip_server') === 0) {
+            if ($k === 'auto_provision.server.url' || $k === 'static.auto_provision.server.url' || $k === 'security.user_password' || strpos($k, 'account.1.sip_server') === 0) {
                 continue;
             }
 
             $is_parsed_tpl = false;
 
-            if (preg_match('/^account\.1\.(sip_server_port|port)$/i', $k)) { $formData['sip_port'] = $v; $is_parsed_tpl = true; }
+            if (preg_match('/^account\.1\.(sip_server_port|sip_server\.1\.port|port)$/i', $k)) { $formData['sip_port'] = $v; $is_parsed_tpl = true; }
             if (preg_match('/^account\.1\.sip_listen_port$/i', $k)) { $formData['sip_listen_port'] = $v; $is_parsed_tpl = true; }
             if (preg_match('/^voice_mail\.number\.1$/i', $k)) { $formData['voicemail_number'] = $v; $is_parsed_tpl = true; }
+            if (preg_match('/^features\.(voice_mail|missed_call|forward_call|text_message)_popup\.enable$/i', $k, $pm_popup)) {
+                $formData['popup_' . strtolower($pm_popup[1])] = ($v === '0') ? '0' : '1';
+                $is_parsed_tpl = true;
+            }
             if (preg_match('/^account\.1\.ringtone\.ring_type$/i', $k)) { $formData['account_ringtone'] = $v; $is_parsed_tpl = true; }
             if (preg_match('/^account\.1\.alert_info_url_enable$/i', $k)) { $is_parsed_tpl = true; }
             if (preg_match('/^distinctive_ring_tones\.alert_info\./i', $k)) { $is_parsed_tpl = true; }
@@ -2569,13 +3275,18 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
                 $is_parsed_tpl = true; 
             }
             if (preg_match('/^phone_setting\.lcd_logo\.mode$/i', $k)) { $is_parsed_tpl = true; }
-            if (preg_match('/^(lcd_logo\.url|phone_setting\.background_image)$/i', $k)) { 
-                if (empty($v) || $v === 'Config:default') {
+            // lcd_logo.url (.dob logos) and phone_setting.backgrounds (color wallpapers).
+            // phone_setting.background_image is the legacy (invalid) key written by EPM <= 1.1.5;
+            // still read so older saved templates load, then re-save with the correct keys.
+            if (preg_match('/^(lcd_logo\.url|phone_setting\.background_image|phone_setting\.backgrounds)$/i', $k)) {
+                if (empty($v)) {
                     $formData['logo_file'] = '';
+                } elseif (preg_match('/^Default:/i', $v) || $v === 'Config:default') {
+                    $formData['logo_file'] = 'system';
                 } else {
-                    $formData['logo_file'] = basename($v);
+                    $formData['logo_file'] = basename(preg_replace('/^Config:/i', '', $v));
                 }
-                $is_parsed_tpl = true; 
+                $is_parsed_tpl = true;
             }
 
             if (preg_match('/^linekey\.(\d+)\.(value|label|type|pickup_value|line)$/i', $k, $m)) {
@@ -2607,7 +3318,7 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
             }
 
             if (preg_match('/^expansion_module\.backgrounds$/i', $k)) {
-                $formData['exp_wallpaper_file'] = basename($v);
+                $formData['exp_wallpaper_file'] = basename(preg_replace('/^Config:/i', '', $v));
                 $is_parsed_tpl = true;
             }
             if (preg_match('/^wallpaper_upload\.url$/i', $k)) { $is_parsed_tpl = true; }
@@ -2616,6 +3327,14 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
                 $pk_id = (int)$m[1];
                 $pk_field = strtolower($m[2]);
                 if ($pk_field === 'history_type') { $pk_field = 'hist'; }
+                // A prior save may have written %NULL% to clear a field that the
+                // key's type no longer uses (see epm_prog_key_null_fields()) -
+                // read it back as the field's normal "unset" value rather than
+                // the literal string, so it doesn't resurface if the admin picks
+                // a type that uses this field again.
+                if (strcasecmp($v, '%NULL%') === 0) {
+                    $v = ($pk_field === 'line') ? '1' : (($pk_field === 'hist') ? '0' : '');
+                }
                 $formData["progkey_{$pk_id}_{$pk_field}"] = $v;
                 if ($pk_field === 'type') { $prog_seen[$pk_id] = true; }
                 $is_parsed_tpl = true;
@@ -2636,7 +3355,7 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
                 }
             }
 
-            sort($filtered_ringtones, SORT_STRING);
+            sort($filtered_ringtones, SORT_STRING | SORT_FLAG_CASE);
             $formData['uploaded_ringtones'] = array_values(array_unique($filtered_ringtones));
         }
 
@@ -2654,6 +3373,14 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
             if (empty($prog_seen[$pid])) {
                 $formData["progkey_{$pid}_type"] = (string)epm_prog_key_default($formData['phone_model'], $pid, $prog_meta);
             }
+            // Snapshot what's actually in effect now (just loaded from this template
+            // file) as the "previous" state for the next save - see
+            // epm_prog_key_null_fields().
+            $formData["progkey_{$pid}_prevtype"]  = $formData["progkey_{$pid}_type"];
+            $formData["progkey_{$pid}_prevline"]  = $formData["progkey_{$pid}_line"] ?? '1';
+            $formData["progkey_{$pid}_prevvalue"] = $formData["progkey_{$pid}_value"] ?? '';
+            $formData["progkey_{$pid}_prevlabel"] = $formData["progkey_{$pid}_label"] ?? '';
+            $formData["progkey_{$pid}_prevhist"]  = $formData["progkey_{$pid}_hist"] ?? '0';
         }
 
         $formData['custom_inputs'] = implode("\n", $unparsed_tpl);
@@ -2768,6 +3495,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
                 } else {
                     $base_content = $file_content;
                 }
+                $dev_overrides_text = epm_extract_device_overrides($file_content);
+                $base_content = epm_strip_device_overrides($base_content);
 
                 if (($pos_ring = strpos($base_content, '-------- DISTINCTIVE RINGTONE')) !== false) {
                     $base_content = substr($base_content, 0, $pos_ring);
@@ -2839,9 +3568,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
                         "account.1.auth_name = {$new_ext}",
                         "account.1.user_name = {$new_ext}",
                         "account.1.password = {$new_ext_secret}",
-                        "account.1.sip_server = {$saved_global_server_ip}",
-                        "account.1.sip_server_host = {$saved_global_server_ip}",
-                        "account.1.sip_server_port = {$default_sip_port}",
+                        "@@EPM_SIP_SERVER@@",
                         "account.1.port = {$default_sip_port}",
                         "linekey.1.type = 15",
                         "linekey.1.line = 1",
@@ -2854,8 +3581,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
                         $vpn_url = "http://" . yealink_epm_apply_redirect_port($saved_global_server_ip, $sysadmin_redirect) . "/PhoneSettings/vpnkeys/{$clean_mac}_{$new_ext}_ovpn.tar";
                         $account_block[] = "openvpn.url = {$vpn_url}";
                         $account_block[] = "network.vpn_enable = 1";
+                    } elseif (strpos($base_content, '/PhoneSettings/fakekeys/null.tar') !== false) {
+                        // VPN was turned off earlier: keep pointing the phone at the empty tar.
+                        $account_block[] = "openvpn.url = " . yealink_epm_fake_vpn_url($saved_global_server_ip, $sysadmin_redirect);
+                        $account_block[] = "network.vpn_enable = 1";
                     }
 
+                    $blk_model = !empty($new_tpl) ? epm_template_phone_model($template_dir . $new_tpl) : '';
+                    if ($blk_model === '' && !empty($override_model)) { $blk_model = $override_model; }
+                    $sip_idx = array_search("@@EPM_SIP_SERVER@@", $account_block, true);
+                    array_splice($account_block, $sip_idx, 1, epm_sip_server_lines($blk_model, $saved_global_server_ip, $default_sip_port));
                     array_splice($updated_lines, 3, 0, $account_block);
                 }
 
@@ -2868,6 +3603,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
                     $final_cfg = rtrim($final_cfg) . "\n\n##### INHERITED TEMPLATE SETTINGS ({$new_tpl}) #####\n" . $tpl_content;
                 }
 
+                $final_cfg = rtrim($final_cfg) . "\n" . epm_wrap_device_overrides($dev_overrides_text);
                 @file_put_contents($f_path, $final_cfg);
                 @chown($f_path, 'asterisk');
 
@@ -2895,7 +3631,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
 // ============================================================================
 $existing_ringtones_init = glob($ringtone_dir . "*.*");
 $ringtone_filenames = array_map('basename', is_array($existing_ringtones_init) ? $existing_ringtones_init : []);
-sort($ringtone_filenames, SORT_STRING);
+sort($ringtone_filenames, SORT_STRING | SORT_FLAG_CASE);
 
 $ringtone_file_sizes = [];
 foreach ($ringtone_filenames as $rf) {
@@ -2935,7 +3671,7 @@ if (is_array($mac_files)) {
     }
 }
 
-$show_flush_ringtone_btn = !empty($missing_referenced_ringtones) && !$just_flushed;
+$show_flush_ringtone_btn = (!empty($missing_referenced_ringtones) || $ringtone_was_deleted) && !$just_flushed;
 
 if ($just_flushed) {
     $show_flush_ringtone_btn = false;
@@ -2995,12 +3731,14 @@ if (is_array($existing_files)) {
         $ext_num = "";
         $ext_label = "";
         $phone_model_read = "Yealink";
+        $dev_has_overrides = false;
         $template_used = "";
 
         $lines = @file($file_path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         if ($lines) {
             foreach ($lines as $l) {
                 $l = trim($l);
+                if ($l === '##### DEVICE OVERRIDES #####') { $dev_has_overrides = true; }
                 if (preg_match('/^#\s*Phone\s*Model\s*:\s*(.+)$/i', $l, $m)) {
                     $found_m = trim($m[1]);
                     if ($phone_model_read === 'Yealink' || empty($phone_model_read)) {
@@ -3050,6 +3788,7 @@ if (is_array($existing_files)) {
             'ip'                => $ip_addr,
             'file'              => $b_name,
             'model'             => $phone_model_read,
+            'has_overrides'     => $dev_has_overrides,
             'template'          => $template_used,
             'ext'               => $ext_num,
             'label'             => $ext_label,

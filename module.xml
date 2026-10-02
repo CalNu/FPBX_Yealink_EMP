@@ -1,11 +1,11 @@
 <module>
 	<rawname>yealink_epm</rawname>
 	<name>Yealink Endpoint Manager</name>
-	<version>1.1.4</version>
+	<version>1.1.7</version>
 	<publisher>HG</publisher>
 	<license>GPLv3</license>
 	<type>setup</type>
-	<category>Custom</category>
+	<category>Utilities</category>
 	<description>Custom Yealink Endpoint Manager and Provisioning Module</description>
 	<menuitems>
 		<yealink_epm>Yealink Endpoint Manager</yealink_epm>

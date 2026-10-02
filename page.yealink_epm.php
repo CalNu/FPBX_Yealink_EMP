@@ -7,6 +7,52 @@ if (!defined('FREEPBX_IS_AUTH')) {
 }
 ?>
 
+<?php
+$epm_tftp_state = function_exists('epm_tftp_status') ? epm_tftp_status() : 'running';
+$epm_tftp_dir_missing = !is_dir('/tftpboot');
+if ($epm_tftp_state !== 'running' || $epm_tftp_dir_missing):
+    $epm_tftp_cmd = 'bash ' . rtrim(realpath(__DIR__) ?: __DIR__, '/') . '/install_tftp.sh';
+?>
+<div style="background:#fff4e5; border:1px solid #f0b35a; border-left:5px solid #e8890c; border-radius:4px; padding:12px 16px; margin:10px 0 14px 0; color:#5a3a00; font-family: Arial, Helvetica, sans-serif;">
+    <strong><?php
+        if ($epm_tftp_state !== 'running') { echo 'TFTP is ' . ($epm_tftp_state === 'installed' ? 'installed but not running' : 'not installed') . ' on this server.'; }
+        if ($epm_tftp_dir_missing) { echo ($epm_tftp_state !== 'running' ? ' ' : '') . 'The /tftpboot folder is missing, so configs cannot be written and the links that live inside it were not created.'; }
+    ?></strong>
+    <?= $epm_tftp_state !== 'running' ? "Phones that fetch their configuration over TFTP won't be able to provision. " : '' ?>To fix it, run this command as root
+    (click it to copy):
+    <div id="epm_tftp_cmd" role="button" tabindex="0" title="Click to copy"
+         onclick="epmCopyTftpCmd(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();epmCopyTftpCmd(this);}"
+         data-cmd="<?= htmlspecialchars($epm_tftp_cmd) ?>"
+         style="margin-top:8px; background:#1e1e1e; color:#e6e6e6; font-family:monospace; font-size:13px; padding:9px 12px; border-radius:4px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:12px; word-break:break-all;">
+        <span><?= htmlspecialchars($epm_tftp_cmd) ?></span>
+        <span class="epm-tftp-copy" style="flex:0 0 auto; font-size:11px; opacity:.75;"><i class="fa fa-clipboard" aria-hidden="true"></i> Click to copy</span>
+    </div>
+    <div style="margin-top:6px; font-size:12px; opacity:.85;">It creates /tftpboot and the module's links, installs the TFTP server, links /tftpboot into /var/www/html, sets file permissions and opens UDP 69 in the firewall. Reload this page afterwards.</div>
+</div>
+<script>
+function epmCopyTftpCmd(box) {
+    var cmd = box.getAttribute('data-cmd'), tag = box.querySelector('.epm-tftp-copy');
+    function done(ok) {
+        if (!tag) return;
+        tag.innerHTML = ok ? '<i class="fa fa-check"></i> Copied!' : 'Press Ctrl+C to copy';
+        setTimeout(function () { tag.innerHTML = '<i class="fa fa-clipboard" aria-hidden="true"></i> Click to copy'; }, 1800);
+    }
+    function fallback() {
+        var ta = document.createElement('textarea');
+        ta.value = cmd; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta);
+        done(ok);
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(cmd).then(function () { done(true); }, fallback);
+    } else { fallback(); }
+}
+</script>
+<?php endif; ?>
+
 <!-- ============================================================================ -->
 <!-- HTML VIEW & STYLES                                                           -->
 <!-- ============================================================================ -->
@@ -135,7 +181,6 @@ if (!defined('FREEPBX_IS_AUTH')) {
     .gen-pk-row > *, .gen-pk-head > *, .gen-lk-row > *, .gen-lk-head > *, .gen-mk-row > *, .gen-mk-head > * { min-width: 0; }
     .gen-pk-row input, .gen-pk-row select, .gen-lk-row input, .gen-lk-row select, .gen-mk-row input, .gen-mk-row select { width: 100%; box-sizing: border-box; }
     .pk-na { display: block; padding: 8px; border: 0px solid #dee2e6; border-radius: 4px; background: transparent; color: #888; font-size: 13px; box-sizing: border-box; }
-    .gen-container input.gen-pk-off { background: #e9ecef; color: #888; }
 
     /* ---- Template tab dashboard (movable boxes) ---- */
     .epm-dash-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
@@ -212,9 +257,9 @@ if (!defined('FREEPBX_IS_AUTH')) {
         .epm-box .gen-pk-head { display: none; }
         .epm-box .gen-pk-row { grid-template-columns: 78px repeat(4, minmax(0, 1fr)); padding-bottom: 6px; border-bottom: 1px solid #eee; margin-top: 6px; }
         .epm-box .gen-pk-row > select[name$="_type"] { grid-column: 2 / 4; }
-        .epm-box .gen-pk-row > .gen-pk-slot { grid-column: 4 / 6; }
-        .epm-box .gen-pk-row > .pk-value { grid-column: 2 / 4; }
-        .epm-box .gen-pk-row > .pk-label { grid-column: 4 / 6; }
+        .epm-box .gen-pk-row > .gen-pk-slot-linehist { grid-column: 4 / 6; }
+        .epm-box .gen-pk-row > .gen-pk-slot-value { grid-column: 2 / 4; }
+        .epm-box .gen-pk-row > .gen-pk-slot-label { grid-column: 4 / 6; }
     }
     @media (max-width: 1000px) {
         .epm-band { flex-direction: column; gap: 16px; }
@@ -520,6 +565,12 @@ if (!defined('FREEPBX_IS_AUTH')) {
     .epm-key-modal-content .gen-pk-row:hover {
         background: #dcefe2 !important;
     }
+    /* Notifications dialog rows: same stripes / hover as the key editors */
+    .epm-notif-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 10px; border-bottom:1px solid #c9dfd0; border-radius:3px; }
+    .epm-notif-row:nth-child(odd) { background:#eaf4ed; }
+    .epm-notif-row:nth-child(even) { background:#f8fbf9; }
+    .epm-notif-row:hover { background:#dcefe2; }
+
     .epm-key-modal-content .gen-lk-head,
     .epm-key-modal-content .gen-mk-head,
     .epm-key-modal-content .gen-pk-head {
@@ -1715,7 +1766,8 @@ function toggleOvpnState(ext, mac, enable) {
     }
 
     function checkUncheckedRingtonesState() {
-        var requiresFlush = false;
+        // Server says phones still reference a deleted/missing ringtone -> keep the banner up.
+        var requiresFlush = (initialShowFlushBtn === true);
 
         document.querySelectorAll('input[name="uploaded_ringtones[]"]').forEach(function(cb) {
             if (!cb.checked && initialRingtoneStates[cb.value] === true) {
@@ -2049,6 +2101,238 @@ function toggleOvpnState(ext, mac, enable) {
             }
         }, 1200);
     }
+</script>
+
+<div style="font-family: Arial, Helvetica, sans-serif !important;" class="epm-key-modal" id="keyModal_notifications" aria-hidden="true">
+  <div class="epm-key-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="keyModalTitle_notifications" style="width:min(460px, 96vw);">
+    <div class="epm-key-modal-head">
+      <strong id="keyModalTitle_notifications"><i class="fa fa-bell" aria-hidden="true"></i>&nbsp; Notifications</strong>
+      <button type="button" class="epm-key-modal-x" aria-label="Close" onclick="closeEpmKeyModal('keyModal_notifications')">&times;</button>
+    </div>
+    <div class="epm-key-modal-content">
+      <div class="epm-notif-list">
+        <div class="epm-notif-row">
+          <span><?= htmlspecialchars('Display Voice Mail Popup') ?></span>
+          <label class="switch" style="margin:0;">
+            <input type="checkbox" data-popup-field="popup_voice_mail" <?= (($formData['popup_voice_mail'] ?? '1') === '0') ? '' : 'checked' ?> onchange="document.getElementById('popup_voice_mail').value = this.checked ? '1' : '0';">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="epm-notif-row">
+          <span><?= htmlspecialchars('Display Missed Call Popup') ?></span>
+          <label class="switch" style="margin:0;">
+            <input type="checkbox" data-popup-field="popup_missed_call" <?= (($formData['popup_missed_call'] ?? '1') === '0') ? '' : 'checked' ?> onchange="document.getElementById('popup_missed_call').value = this.checked ? '1' : '0';">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="epm-notif-row">
+          <span><?= htmlspecialchars('Display Forward Call Popup') ?></span>
+          <label class="switch" style="margin:0;">
+            <input type="checkbox" data-popup-field="popup_forward_call" <?= (($formData['popup_forward_call'] ?? '1') === '0') ? '' : 'checked' ?> onchange="document.getElementById('popup_forward_call').value = this.checked ? '1' : '0';">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="epm-notif-row">
+          <span><?= htmlspecialchars('Display Text Message Popup') ?></span>
+          <label class="switch" style="margin:0;">
+            <input type="checkbox" data-popup-field="popup_text_message" <?= (($formData['popup_text_message'] ?? '1') === '0') ? '' : 'checked' ?> onchange="document.getElementById('popup_text_message').value = this.checked ? '1' : '0';">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="epm-key-modal-foot">
+      <span class="epm-key-modal-note">Changes are included when you save the template.</span>
+      <button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal('keyModal_notifications')">Close</button>
+    </div>
+  </div>
+</div>
+
+<style>
+    .epm-ov-edit-btn { border:1px solid #9bc3a8; background:#f3faf5; color:#2f7a4a; border-radius:4px; padding:3px 7px; cursor:pointer; line-height:1; }
+    .epm-ov-edit-btn:hover { background:#dcefe2; }
+    .epm-ov-edit-btn.has-ov { background:#2f9e5b; border-color:#2f9e5b; color:#fff; }
+    .epm-ov-h { margin:14px 0 6px 0; font-size:12px; font-weight:bold; text-transform:uppercase; letter-spacing:.04em; opacity:.7; }
+    .epm-ov-btnrow { display:flex; flex-wrap:wrap; gap:8px; }
+    .epm-ov-row { display:flex; align-items:center; gap:8px; padding:6px 10px; border-bottom:1px solid #c9dfd0; flex-wrap:wrap; }
+    .epm-ov-row:nth-child(odd) { background:#eaf4ed; }
+    .epm-ov-row:nth-child(even) { background:#f8fbf9; }
+    .epm-ov-row:hover { background:#dcefe2; }
+    .epm-ov-row .epm-ov-num { width:26px; font-weight:bold; text-align:center; flex:0 0 auto; }
+    .epm-ov-row .epm-ov-name { width:120px; flex:0 0 auto; font-size:12px; }
+    .epm-ov-row select, .epm-ov-row input { border:none; border-bottom:1px solid #b9d3c1; background:transparent; outline:none; font-size:13px; padding:3px 2px; min-width:0; }
+    .epm-ov-row input { flex:1 1 110px; }
+    .epm-ov-row select { flex:0 1 auto; }
+    .epm-ov-row.epm-ov-locked { opacity:.55; }
+    .epm-ov-ta { width:100%; box-sizing:border-box; min-height:110px; font-family:monospace; font-size:12px; padding:8px; border:1px solid #b9d3c1; border-radius:4px; }
+    .epm-ov-sel { width:100%; padding:6px; border:1px solid #b9d3c1; border-radius:4px; }
+    #epm_ov_msg { font-size:12px; margin-right:auto; }
+</style>
+<script>
+var epmOv = (function () {
+    var mac = '', data = null;
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+    function el(id) { return document.getElementById(id); }
+
+    function shell(id, title, icon, bodyId, footHtml, width) {
+        return '<div class="epm-key-modal" id="' + id + '" aria-hidden="true" style="font-family: Arial, Helvetica, sans-serif !important;">' +
+          '<div class="epm-key-modal-dialog" role="dialog" aria-modal="true" style="width:' + (width || 'min(560px, 96vw)') + ';">' +
+            '<div class="epm-key-modal-head"><strong><i class="fa ' + icon + '" aria-hidden="true"></i>&nbsp; <span id="' + id + '_title">' + esc(title) + '</span></strong>' +
+            '<button type="button" class="epm-key-modal-x" aria-label="Close" onclick="closeEpmKeyModal(\'' + id + '\')">&times;</button></div>' +
+            '<div class="epm-key-modal-content" id="' + bodyId + '"></div>' +
+            '<div class="epm-key-modal-foot">' + footHtml + '</div>' +
+          '</div></div>';
+    }
+
+    function ensure() {
+        if (el('epmOvMain')) return;
+        var h = shell('epmOvMain', 'Device Overrides', 'fa-pencil', 'epm_ov_main_body',
+            '<span id="epm_ov_msg"></span>' +
+            '<button type="button" class="gen-btn" onclick="closeEpmKeyModal(\'epmOvMain\')">Cancel</button> ' +
+            '<button type="button" class="gen-btn" onclick="epmOv.save(false)">Save</button> ' +
+            '<button type="button" class="gen-btn" onclick="epmOv.save(true)">Save &amp; Sync</button>', 'min(600px, 96vw)');
+        h += shell('epmOvLine', 'Line Keys', 'fa-th-list', 'epm_ov_line_body', '<span class="epm-key-modal-note">Only fields you change are saved as overrides.</span><button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal(\'epmOvLine\')">Done</button>', 'min(760px, 96vw)');
+        h += shell('epmOvMem', 'Memory Keys', 'fa-th', 'epm_ov_mem_body', '<span class="epm-key-modal-note">Built-in keys first, then any expansion module keys from the template.</span><button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal(\'epmOvMem\')">Done</button>', 'min(760px, 96vw)');
+        h += shell('epmOvProg', 'Programmable Keys', 'fa-keyboard-o', 'epm_ov_prog_body', '<span class="epm-key-modal-note">Only fields you change are saved as overrides.</span><button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal(\'epmOvProg\')">Done</button>', 'min(760px, 96vw)');
+        var d = document.createElement('div');
+        d.innerHTML = h;
+        while (d.firstChild) document.body.appendChild(d.firstChild);
+    }
+
+    function typeOptions(map, sel) {
+        var o = '';
+        Object.keys(map).forEach(function (k) { o += '<option value="' + esc(k) + '"' + (String(k) === String(sel) ? ' selected' : '') + '>' + esc(map[k]) + '</option>'; });
+        return o;
+    }
+    function lineOptions(max, sel) {
+        var o = '';
+        for (var i = 1; i <= max; i++) { o += '<option value="' + i + '"' + (String(i) === String(sel) ? ' selected' : '') + '>Line ' + i + '</option>'; }
+        return o;
+    }
+
+    function keyRows(list, prefix, lockFirst) {
+        var h = '';
+        list.forEach(function (k, i) {
+            var idx = i + 1, locked = (lockFirst && idx === 1);
+            h += '<div class="epm-ov-row' + (locked ? ' epm-ov-locked' : '') + '" data-idx="' + idx + '">' +
+              '<span class="epm-ov-num">' + idx + '</span>' +
+              '<select data-f="type"' + (locked ? ' disabled' : '') + '>' + typeOptions(data.dss, k.type) + '</select>' +
+              '<input data-f="value" placeholder="Value / Extension" value="' + esc(k.value) + '"' + (locked ? ' disabled' : '') + '>' +
+              '<input data-f="label" placeholder="Label" value="' + esc(k.label) + '"' + (locked ? ' disabled' : '') + '>' +
+              '<input data-f="pickup" placeholder="Pickup (e.g. **)" value="' + esc(k.pickup) + '"' + (locked ? ' disabled' : '') + '>' +
+              '<select data-f="line"' + (locked ? ' disabled' : '') + '>' + lineOptions(data.maxLines, k.line) + '</select></div>';
+        });
+        return h;
+    }
+
+    function progRows() {
+        var h = '';
+        data.prog.forEach(function (k) {
+            h += '<div class="epm-ov-row" data-idx="' + k.id + '">' +
+              '<span class="epm-ov-name">' + esc(k.name) + '</span>' +
+              '<select data-f="type" onchange="epmOv.progType(this)">' + typeOptions(data.progTypes, k.type) + '</select>' +
+              '<select data-f="line" data-show="line">' + lineOptions(data.maxLines, k.line) + '</select>' +
+              '<input data-f="value" data-show="value" placeholder="Value" value="' + esc(k.value) + '">' +
+              '<select data-f="hist" data-show="hist"><option value="0"' + (k.hist === '1' ? '' : ' selected') + '>Local History</option><option value="1"' + (k.hist === '1' ? ' selected' : '') + '>Network CallLog</option></select>' +
+              (k.id <= 4 ? '<input data-f="label" data-show="label" placeholder="Label" value="' + esc(k.label) + '">' : '') +
+              '</div>';
+        });
+        return h;
+    }
+
+    function progType(sel) {
+        var row = sel.closest('.epm-ov-row'), t = parseInt(sel.value, 10), f = data.progFields[t] || [];
+        row.querySelectorAll('[data-show]').forEach(function (c) {
+            var w = c.getAttribute('data-show');
+            c.style.display = (w === 'label') ? (t !== 0 ? '' : 'none') : (f.indexOf(w) !== -1 ? '' : 'none');
+        });
+    }
+
+    function render() {
+        var pp = [['voice_mail', 'Display Voice Mail Popup'], ['missed_call', 'Display Missed Call Popup'], ['forward_call', 'Display Forward Call Popup'], ['text_message', 'Display Text Message Popup']];
+        var h = '<div class="epm-ov-h">Notifications</div><div class="epm-notif-list">';
+        pp.forEach(function (p) {
+            h += '<div class="epm-notif-row"><span>' + p[1] + '</span><label class="switch" style="margin:0;">' +
+                 '<input type="checkbox" data-ov-popup="' + p[0] + '"' + (data.popups[p[0]] === '0' ? '' : ' checked') + '><span class="slider"></span></label></div>';
+        });
+        h += '</div><div class="epm-ov-h">Keys</div><div class="epm-ov-btnrow">' +
+             '<button type="button" class="gen-btn" onclick="openEpmKeyModal(\'epmOvLine\')">Line Keys</button>' +
+             '<button type="button" class="gen-btn" onclick="openEpmKeyModal(\'epmOvMem\')">Memory Keys</button>' +
+             (data.prog.length ? '<button type="button" class="gen-btn" onclick="openEpmKeyModal(\'epmOvProg\')">Programmable Keys</button>' : '') +
+             '</div><div class="epm-ov-h">Default Account Ringtone</div><select class="epm-ov-sel" id="epm_ov_ring">';
+        data.ringtones.builtin.forEach(function (r) { h += '<option value="' + esc(r[0]) + '"' + (r[0] === data.ringtone ? ' selected' : '') + '>' + esc(r[1]) + '</option>'; });
+        if (data.ringtones.custom.length) {
+            h += '<optgroup label="Custom ringtones">';
+            data.ringtones.custom.forEach(function (f) { h += '<option value="' + esc(f) + '"' + (f === data.ringtone ? ' selected' : '') + '>' + esc(f) + '</option>'; });
+            h += '</optgroup>';
+        }
+        h += '</select><div class="epm-ov-h">Custom Key / Value Additions</div>' +
+             '<textarea class="epm-ov-ta" id="epm_ov_custom" spellcheck="false" placeholder="key = value (one per line)">' + esc(data.custom) + '</textarea>';
+        el('epm_ov_main_body').innerHTML = h;
+        el('epm_ov_line_body').innerHTML = keyRows(data.linekeys, 'linekey', true);
+        el('epm_ov_mem_body').innerHTML = data.memkeys.length ? keyRows(data.memkeys, 'memorykey', false) : '<div style="padding:16px; font-size:13px; opacity:.8;">This phone has no memory keys: it has no built-in ones and its template has no expansion module.</div>';
+        el('epm_ov_prog_body').innerHTML = progRows();
+        el('epm_ov_prog_body').querySelectorAll('select[data-f="type"]').forEach(progType);
+    }
+
+    function collect(bodyId) {
+        var rows = [];
+        el(bodyId).querySelectorAll('.epm-ov-row').forEach(function (r) {
+            var o = { idx: parseInt(r.getAttribute('data-idx'), 10) };
+            r.querySelectorAll('[data-f]').forEach(function (c) { if (!c.disabled) o[c.getAttribute('data-f')] = c.value; });
+            rows.push(o);
+        });
+        return rows;
+    }
+
+    function open(m) {
+        ensure();
+        mac = m;
+        el('epmOvMain_title').textContent = 'Device Overrides - ' + m.toUpperCase();
+        el('epm_ov_msg').textContent = 'Loading...';
+        el('epm_ov_main_body').innerHTML = '';
+        openEpmKeyModal('epmOvMain');
+        fetch('?display=yealink_epm&action=get_device_overrides&mac=' + encodeURIComponent(m))
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (j.error) { el('epm_ov_msg').textContent = j.error; return; }
+                data = j;
+                el('epmOvMain_title').textContent = 'Device Overrides - ' + (j.ext ? 'Ext ' + j.ext + ' - ' : '') + j.model + ' (' + m.toUpperCase() + ')';
+                el('epm_ov_msg').textContent = '';
+                render();
+            })
+            .catch(function (e) { el('epm_ov_msg').textContent = 'Load failed: ' + e; });
+    }
+
+    function save(sync) {
+        if (!data) return;
+        var popups = {};
+        el('epm_ov_main_body').querySelectorAll('[data-ov-popup]').forEach(function (c) { popups[c.getAttribute('data-ov-popup')] = c.checked ? '1' : '0'; });
+        var payload = {
+            popups: popups,
+            ringtone: el('epm_ov_ring').value,
+            linekeys: collect('epm_ov_line_body'),
+            memkeys: collect('epm_ov_mem_body'),
+            progkeys: collect('epm_ov_prog_body'),
+            custom: el('epm_ov_custom').value
+        };
+        el('epm_ov_msg').textContent = 'Saving...';
+        var body = 'save_device_overrides=1&mac=' + encodeURIComponent(mac) + '&sync=' + (sync ? '1' : '0') + '&payload=' + encodeURIComponent(JSON.stringify(payload));
+        fetch('?display=yealink_epm', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (j.error) { el('epm_ov_msg').textContent = j.error; return; }
+                var msg = j.lines + ' override line' + (j.lines === 1 ? '' : 's') + ' saved' + (j.synced ? ', check-sync sent' : '') + (j.dropped ? ' (' + j.dropped + ' invalid custom line dropped)' : '') + '.';
+                el('epm_ov_msg').textContent = msg;
+                var eb = document.querySelector('.epm-ov-edit-btn[onclick*="epmOv.open(\'' + mac + '\')"]');
+                if (eb) { eb.classList.toggle('has-ov', j.lines > 0); eb.title = j.lines > 0 ? 'Edit device overrides (this phone has overrides)' : 'Edit device overrides'; }
+                setTimeout(function () { closeEpmKeyModal('epmOvMain'); }, 1000);
+            })
+            .catch(function (e) { el('epm_ov_msg').textContent = 'Save failed: ' + e; });
+    }
+
+    return { open: open, save: save, progType: progType };
+})();
 </script>
 
 <form id="delete_file_form" method="POST" style="display:none;">
@@ -2474,14 +2758,14 @@ function toggleOvpnState(ext, mac, enable) {
                                 </select>
                             </div>
                             <div>
-                                <label>Weekly Provisioning Enable:</label>
+                                <label>Weekly Provisioning:</label>
                                 <select name="auto_provision_weekly_enable" class="gen-full-width shadow-box">
                                     <option value="1" <?= ($formData['auto_provision_weekly_enable'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
                                     <option value="0" <?= ($formData['auto_provision_weekly_enable'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
                                 </select>
                             </div>
                             <div>
-                                <label>DHCP Option Enable:</label>
+                                <label>DHCP Option:</label>
                                 <select name="auto_provision_dhcp_option_enable" class="gen-full-width shadow-box">
                                     <option value="1" <?= ($formData['auto_provision_dhcp_option_enable'] === '1') ? 'selected' : '' ?>>1 - Enabled</option>
                                     <option value="0" <?= ($formData['auto_provision_dhcp_option_enable'] === '0') ? 'selected' : '' ?>>0 - Disabled</option>
@@ -2591,7 +2875,7 @@ function toggleOvpnState(ext, mac, enable) {
                                 </select>
                             </div>
                             <div>
-                                <label>Inter-Digit Timeout:</label>
+                                <label>Dial Now Delay:</label>
                                 <select name="dialnow_timeout" class="shadow-box gen-full-width">
                                     <?php for ($sec = 1; $sec <= 14; $sec++): ?>
                                         <option value="<?= $sec ?>" <?= ($formData['dialnow_timeout'] == $sec) ? 'selected' : '' ?>><?= $sec ?> Seconds</option>
@@ -2772,7 +3056,14 @@ function toggleOvpnState(ext, mac, enable) {
                             </div>
                             <div>
                                 <label>Voicemail Extension Number:</label>
-                                <input type="text" class="gen-full-width shadow-box" name="voicemail_number" placeholder="*97" value="<?= htmlspecialchars($formData['voicemail_number']) ?>">
+                                <div style="display:flex; gap:8px; align-items:center;">
+                                    <input type="text" class="gen-full-width shadow-box" name="voicemail_number" placeholder="*97" value="<?= htmlspecialchars($formData['voicemail_number']) ?>" style="flex:1; min-width:0;">
+                                    <button type="button" id="popup_settings_btn" class="gen-btn" style="white-space:nowrap; margin:0;" title="Notification popups" onclick="openEpmKeyModal('keyModal_notifications')"><i class="fa fa-bell"></i> Notifications</button>
+                                </div>
+                                <input type="hidden" id="popup_voice_mail" name="popup_voice_mail" value="<?= htmlspecialchars($formData['popup_voice_mail'] ?? '1') ?>">
+                                <input type="hidden" id="popup_missed_call" name="popup_missed_call" value="<?= htmlspecialchars($formData['popup_missed_call'] ?? '1') ?>">
+                                <input type="hidden" id="popup_forward_call" name="popup_forward_call" value="<?= htmlspecialchars($formData['popup_forward_call'] ?? '1') ?>">
+                                <input type="hidden" id="popup_text_message" name="popup_text_message" value="<?= htmlspecialchars($formData['popup_text_message'] ?? '1') ?>">
                             </div>
                         </div>
                     </div>
@@ -3032,8 +3323,8 @@ function toggleOvpnState(ext, mac, enable) {
                             <button type="button" class="epm-tool" data-act="fold" title="Collapse / expand"><i class="fa fa-chevron-up"></i></button>
                         </span>
                     </header>
-                    <div class="epm-box-body box-bg">
-                        <textarea readonly class="gen-textarea shadow-box"><?= htmlspecialchars($generated_template_cfg) ?></textarea>
+                    <div class="epm-box-body box-bg" >
+                        <textarea readonly class="gen-textarea shadow-box" style="height: 450px;"><?= htmlspecialchars($generated_template_cfg) ?></textarea>
                     </div>
                 </section>
                 <?php endif; ?>
@@ -3224,12 +3515,28 @@ function toggleOvpnState(ext, mac, enable) {
 				<span Style="padding-left: 10px;">Label</span>
 			</div>
 
+                        <?php $pk_model = $formData['phone_model'] ?? 'manual'; ?>
                         <?php foreach ($prog_key_names as $pid => $pname):
                             $pk_type = (string)($formData["progkey_{$pid}_type"] ?? '0');
                             $pk_line = (string)($formData["progkey_{$pid}_line"] ?? '1');
                             $pk_hist = (string)($formData["progkey_{$pid}_hist"] ?? '0');
+                            // Snapshot, at load time, whether this key is already non-default
+                            // (i.e. already saved/pushed to phones). Rides along as a hidden
+                            // field so that if the admin reverts it back to default during this
+                            // edit, the save still knows to write the default explicitly instead
+                            // of silently dropping the key - see epm_build_prog_keys_block().
+                            $pk_was_custom = epm_prog_key_is_custom($pid, $pk_model, $formData, $prog_meta);
                         ?>
                         <div id="progkey_row_<?= $pid ?>" class="gen-key-row gen-pk-row" data-pk-group="<?= ($pid <= 4) ? 'soft' : 'hard' ?>" style="<?= ($pid <= 4) ? 'display:none;' : '' ?>">
+                            <input type="hidden" name="progkey_<?= $pid ?>_wascustom" value="<?= $pk_was_custom ? '1' : '' ?>">
+                            <!-- Snapshot of what's already in effect (before this edit) so a save that
+                                 drops a field the new type doesn't use can null it out instead of just
+                                 leaving the stale value on the phone - see epm_prog_key_null_fields(). -->
+                            <input type="hidden" name="progkey_<?= $pid ?>_prevtype" value="<?= htmlspecialchars($pk_type) ?>">
+                            <input type="hidden" name="progkey_<?= $pid ?>_prevline" value="<?= htmlspecialchars($pk_line) ?>">
+                            <input type="hidden" name="progkey_<?= $pid ?>_prevhist" value="<?= htmlspecialchars($pk_hist) ?>">
+                            <input type="hidden" name="progkey_<?= $pid ?>_prevvalue" value="<?= htmlspecialchars($formData["progkey_{$pid}_value"] ?? '') ?>">
+                            <input type="hidden" name="progkey_<?= $pid ?>_prevlabel" value="<?= htmlspecialchars($formData["progkey_{$pid}_label"] ?? '') ?>">
                             <span class="gen-pk-name"><?= htmlspecialchars($pname) ?></span>
                             <select Style=" border: none; background: transparent; outline: none;" name="progkey_<?= $pid ?>_type" onchange="progKeyRefreshRow(<?= $pid ?>);">
                                 <?php foreach ($prog_key_types as $t_code => $t_label): ?>
@@ -3239,7 +3546,7 @@ function toggleOvpnState(ext, mac, enable) {
                                     <option value="<?= htmlspecialchars($pk_type) ?>" selected>Other (<?= htmlspecialchars($pk_type) ?>)</option>
                                 <?php endif; ?>
                             </select>
-                            <div class="gen-pk-slot" >
+                            <div class="gen-pk-slot gen-pk-slot-linehist">
                                 <select Style=" border: none; background: transparent; outline: none;" name="progkey_<?= $pid ?>_line" class="pk-line">
                                     <?php for ($l = 0; $l <= 16; $l++): ?>
                                         <option value="<?= $l ?>" <?= ($pk_line === (string)$l) ? 'selected' : '' ?>><?= ($l === 0) ? 'Auto / All (0)' : 'Line ' . $l ?></option>
@@ -3251,8 +3558,14 @@ function toggleOvpnState(ext, mac, enable) {
                                 </select>
                                 <span class="pk-na">N/A</span>
                             </div>
-                            <input type="text" Style=" border: none; background: transparent; outline: none;" class="pk-value" name="progkey_<?= $pid ?>_value" placeholder="Number / URL" value="<?= htmlspecialchars($formData["progkey_{$pid}_value"] ?? '') ?>">
-                            <input type="text" Style=" border: none; background: transparent; outline: none;" class="pk-label" name="progkey_<?= $pid ?>_label" placeholder="Label" value="<?= htmlspecialchars($formData["progkey_{$pid}_label"] ?? '') ?>">
+                            <div class="gen-pk-slot gen-pk-slot-value">
+                                <input type="text" Style=" border: none; background: transparent; outline: none;" class="pk-value" name="progkey_<?= $pid ?>_value" placeholder="Number / URL" value="<?= htmlspecialchars($formData["progkey_{$pid}_value"] ?? '') ?>">
+                                <span class="pk-na">N/A</span>
+                            </div>
+                            <div class="gen-pk-slot gen-pk-slot-label">
+                                <input type="text" Style=" border: none; background: transparent; outline: none;" class="pk-label" name="progkey_<?= $pid ?>_label" placeholder="Label" value="<?= htmlspecialchars($formData["progkey_{$pid}_label"] ?? '') ?>">
+                                <span class="pk-na">N/A</span>
+                            </div>
                         </div>
                         <?php endforeach; ?>
                         </div>
@@ -3273,7 +3586,7 @@ function toggleOvpnState(ext, mac, enable) {
     </div>
     <div class="epm-key-modal-content"><section class="epm-box epm-key-editor" id="box_expwallpaper">
                     <div class="epm-box-body">
-                        <p class="gen-key-note">EXP43 and EXP50 have a color LCD and can show a custom wallpaper/background image (272&times;480). EXP20 and EXP40 do not support this.</p>
+                        <p class="gen-key-note">EXP43 and EXP50 have a color LCD and can show a custom wallpaper/background image (272&times;480). EXP20 and EXP40 do not support this. The module wallpaper is chosen separately from the phone wallpaper, so they can be different images. Yealink downloads images through a single <code>wallpaper_upload.url</code>, so when the two differ, the phone re-provisioning may need two cycles for both images to appear.</p>
                         <div class="epm-stack">
                             <div>
                                 <label style="margin-top:6px;">Existing file:</label>
@@ -3415,12 +3728,15 @@ function toggleOvpnState(ext, mac, enable) {
                                 <td>Yealink</td>
                                 <td><?= htmlspecialchars($dev['model']) ?></td>
                                 <td>
+                                    <div style="display:flex; align-items:center; gap:6px;">
                                     <select class="shadow-box sans-font" id="phone_tpl_<?= htmlspecialchars($dev['mac']) ?>" name="phone_template[<?= htmlspecialchars($dev['mac']) ?>]" style="padding:4px; border-radius:4px; border:1px solid #ccc;">
                                         <option value="" <?= empty($dev['template']) ? 'selected' : '' ?>>-- None --</option>
                                         <?php foreach ($available_templates as $tpl_file => $tpl_label): ?>
                                             <option value="<?= htmlspecialchars($tpl_file) ?>" <?= ($dev['template'] === $tpl_file) ? 'selected' : '' ?>><?= htmlspecialchars($tpl_label) ?></option>
                                         <?php endforeach; ?>
                                     </select>
+                                    <button type="button" class="epm-ov-edit-btn<?= !empty($dev['has_overrides']) ? ' has-ov' : '' ?>" title="<?= !empty($dev['has_overrides']) ? 'Edit device overrides (this phone has overrides)' : 'Edit device overrides' ?>" onclick="epmOv.open('<?= htmlspecialchars($dev['mac']) ?>')"><i class="fa fa-pencil" aria-hidden="true"></i></button>
+                                    </div>
                                 </td>
                                 <td>
                                     <select class="shadow-box sans-font" name="phone_extension[<?= htmlspecialchars($dev['mac']) ?>]" style="padding:4px; border-radius:4px; border:1px solid #ccc;">
@@ -3751,13 +4067,6 @@ function toggleOvpnState(ext, mac, enable) {
         return progKeyModelDefaults[model] || progKeyModelDefaults['manual'];
     }
 
-    function progKeySetEnabled(input, on) {
-        if (!input) { return; }
-        input.readOnly = !on;
-        input.tabIndex = on ? 0 : -1;
-        input.classList.toggle('gen-pk-off', !on);
-    }
-
     function progKeyBuildLineOptions(sel, type) {
         var cur = sel.value || '1';
         var allowZero = (type === 2 || type === 13 || type === 14);
@@ -3778,21 +4087,30 @@ function toggleOvpnState(ext, mac, enable) {
         if (sel.selectedIndex < 0) { sel.value = '1'; }
     }
 
+    // Swaps a field out for an "N/A" placeholder when the selected type doesn't
+    // use it - same treatment for Value/Label as Line/History already get,
+    // rather than just disabling the input (which is easy to miss visually).
+    function progKeySwap(input, na, on) {
+        if (!input || !na) { return; }
+        input.style.display = on ? '' : 'none';
+        na.style.display = on ? 'none' : '';
+    }
+
     function progKeyRefreshRow(id) {
         var row = document.getElementById('progkey_row_' + id);
         if (!row) { return; }
         var t = progKeyType(id);
         var line = row.querySelector('.pk-line');
         var hist = row.querySelector('.pk-hist');
-        var na = row.querySelector('.pk-na');
+        var na = row.querySelector('.gen-pk-slot-linehist .pk-na');
         var showLine = progKeyHas(t, 'line');
         var showHist = progKeyHas(t, 'hist');
         line.style.display = showLine ? '' : 'none';
         hist.style.display = showHist ? '' : 'none';
         na.style.display = (showLine || showHist) ? 'none' : '';
         if (showLine) { progKeyBuildLineOptions(line, t); }
-        progKeySetEnabled(row.querySelector('.pk-value'), progKeyHas(t, 'value'));
-        progKeySetEnabled(row.querySelector('.pk-label'), id <= 4 && t !== 0);
+        progKeySwap(row.querySelector('.pk-value'), row.querySelector('.gen-pk-slot-value .pk-na'), progKeyHas(t, 'value'));
+        progKeySwap(row.querySelector('.pk-label'), row.querySelector('.gen-pk-slot-label .pk-na'), id <= 4 && t !== 0);
         refreshKeySummaries();
     }
 

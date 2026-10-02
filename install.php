@@ -17,21 +17,70 @@ $phone_settings_dir = $amp_conf['AMPWEBROOT'] . '/PhoneSettings';
 $tftp_dir = "/tftpboot/";
 $template_dir = "/tftpboot/templates/";
 
-if (!file_exists($tftp_dir)) {
-    @mkdir($tftp_dir, 0775, true);
-    @chown($tftp_dir, 'asterisk');
-    @chgrp($tftp_dir, 'asterisk');
-}
-
-if (!file_exists($template_dir)) {
-    if (!@mkdir($template_dir, 0775, true)) {
-        out("Failed to create directory: {$template_dir}");
-    } else {
-        out("Created directory: {$template_dir}");
+// Incredible PBX (and some minimal installs) ship without a TFTP server. Check for one first:
+// 'running' = something listens on UDP 69, 'installed' = server files exist but nothing listens.
+if (!function_exists('yealink_epm_tftp_state')) {
+    function yealink_epm_tftp_state() {
+        foreach (['/proc/net/udp', '/proc/net/udp6'] as $f) {
+            $rows = @file($f, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            if (!$rows) { continue; }
+            foreach (array_slice($rows, 1) as $r) {
+                $cols = preg_split('/\s+/', trim($r));
+                if (isset($cols[1]) && preg_match('/:0045$/i', $cols[1])) { return 'running'; }
+            }
+        }
+        foreach (['/usr/sbin/in.tftpd', '/usr/libexec/tftpd', '/usr/sbin/tftpd', '/etc/default/tftpd-hpa',
+                  '/lib/systemd/system/tftpd-hpa.service', '/usr/lib/systemd/system/tftp.socket',
+                  '/usr/lib/systemd/system/tftp.service', '/etc/xinetd.d/tftp'] as $p) {
+            if (file_exists($p)) { return 'installed'; }
+        }
+        return 'missing';
     }
 }
-@chown($template_dir, 'asterisk');
-@chgrp($template_dir, 'asterisk');
+$tftp_state = yealink_epm_tftp_state();
+if ($tftp_state === 'running') {
+    out("TFTP server detected and running.");
+} else {
+    out("<warning>TFTP is " . ($tftp_state === 'installed' ? "installed but not running" : "not installed") . " on this server. "
+      . "Creating the {$tftp_dir} folder so the module can still generate configs; to install and configure TFTP run: "
+      . "bash {$module_root}/install_tftp.sh</warning>");
+}
+
+// Module installs normally run as the "asterisk" user, which is not allowed to create folders
+// directly under "/". Check the result instead of assuming it worked, and if mkdir is refused
+// try passwordless sudo before giving up.
+if (!is_dir($tftp_dir)) {
+    if (!@mkdir($tftp_dir, 0775, true)) {
+        $sudo_out = [];
+        $sudo_ret = 1;
+        @exec('sudo -n mkdir -p ' . escapeshellarg($template_dir)
+            . ' && sudo -n chown -R asterisk:asterisk ' . escapeshellarg(rtrim($tftp_dir, '/'))
+            . ' && sudo -n chmod 775 ' . escapeshellarg(rtrim($tftp_dir, '/')) . ' 2>&1', $sudo_out, $sudo_ret);
+    }
+    clearstatcache();
+    if (is_dir($tftp_dir)) {
+        @chown($tftp_dir, 'asterisk');
+        @chgrp($tftp_dir, 'asterisk');
+        out("Created directory: {$tftp_dir}");
+    } else {
+        out("<warning>Could not create {$tftp_dir}: the installer does not have permission to write under /. "
+          . "Run this once as root - it creates {$tftp_dir} and every link that lives inside it: "
+          . "bash {$module_root}/install_tftp.sh</warning>");
+    }
+}
+$tftp_root_ok = is_dir($tftp_dir);
+
+if ($tftp_root_ok) {
+    if (!file_exists($template_dir)) {
+        if (!@mkdir($template_dir, 0775, true)) {
+            out("Failed to create directory: {$template_dir}");
+        } else {
+            out("Created directory: {$template_dir}");
+        }
+    }
+    @chown($template_dir, 'asterisk');
+    @chgrp($template_dir, 'asterisk');
+}
 
 // PhoneSettings must be a REAL directory: it holds the logos, ringtones and VPN
 // keys. v1.0.4 wrongly turned it into a symlink to /tftpboot. If we find that
@@ -62,7 +111,7 @@ if ($phone_settings_ok) {
     @chown($phone_settings_dir, 'asterisk');
     @chgrp($phone_settings_dir, 'asterisk');
 
-    $asset_subdirs = ['logo', 'ringtones', 'vpnkeys'];
+    $asset_subdirs = ['logo', 'ringtones', 'vpnkeys', 'fakekeys'];
 
     // Recover assets left in the old symlink's target (normally /tftpboot).
     // Never overwrites anything that already exists at the destination.
@@ -117,6 +166,20 @@ if ($phone_settings_ok) {
         @chown($dir, 'asterisk');
         @chgrp($dir, 'asterisk');
     }
+
+    // Empty tarball phones are pointed at when their VPN is turned off (see the VPN toggle):
+    // they download it, find no VPN config in it and stop retrying - without needing a reboot.
+    $null_tar = $phone_settings_dir . '/fakekeys/null.tar';
+    if (is_dir($phone_settings_dir . '/fakekeys') && !file_exists($null_tar)) {
+        if (@file_put_contents($null_tar, '') !== false) {
+            @chown($null_tar, 'asterisk');
+            @chgrp($null_tar, 'asterisk');
+            @chmod($null_tar, 0644);
+            out("Created empty file: {$null_tar}");
+        } else {
+            out("Failed to create {$null_tar}");
+        }
+    }
 } else {
     out("ERROR: {$phone_settings_dir} could not be set up as a real folder - skipping logo/ringtones/vpnkeys creation and PhoneSettings symlinks. Resolve the error above and re-run the install.");
 }
@@ -164,14 +227,20 @@ if ($phone_settings_ok) {
     deploy_module_symlink($module_root, $phone_settings_dir . '/' . $module_name); // PhoneSettings/yealink_epm  -> module dir
 
     // Inside /tftpboot
-    deploy_module_symlink($phone_settings_dir, $tftp_root . '/PhoneSettings');     // /tftpboot/PhoneSettings    -> /var/www/html/PhoneSettings
+    if ($tftp_root_ok) {
+        deploy_module_symlink($phone_settings_dir, $tftp_root . '/PhoneSettings'); // /tftpboot/PhoneSettings    -> /var/www/html/PhoneSettings
+    }
 
     // Inside the module dir
     deploy_module_symlink($phone_settings_dir, $module_root . '/PhoneSettings');   // yealink_epm/PhoneSettings  -> /var/www/html/PhoneSettings
 }
 
 // Inside /tftpboot
-deploy_module_symlink($module_root, $tftp_root . '/' . $module_name);              // /tftpboot/yealink_epm      -> module dir
+if ($tftp_root_ok) {
+    deploy_module_symlink($module_root, $tftp_root . '/' . $module_name);          // /tftpboot/yealink_epm      -> module dir
+} else {
+    out("<warning>Skipped the links inside {$tftp_root} (the folder does not exist yet). install_tftp.sh creates them.</warning>");
+}
 
 // Inside the module dir
 deploy_module_symlink($tftp_root, $module_root . '/tftpboot');                     // yealink_epm/tftpboot       -> /tftpboot
@@ -256,13 +325,16 @@ DirectoryIndex disabled
     Allow from 192.168.0.0/16
 </IfModule>
 
-IndexIgnore openvpn ovpn_mgr vpnkeys yealink_epm
+IndexIgnore openvpn ovpn_mgr vpnkeys yealink_epm fakekeys
 
 EOT;
 
 // PhoneSettings and /tftpboot are two separate real folders, so each gets its
 // own copy.
-$target_htaccess_files = ["/tftpboot/.htaccess"];
+$target_htaccess_files = [];
+if ($tftp_root_ok) {
+    $target_htaccess_files[] = "/tftpboot/.htaccess";
+}
 if ($phone_settings_ok) {
     $target_htaccess_files[] = $phone_settings_dir . "/.htaccess";
 }

@@ -1,11 +1,33 @@
+1.1.7
+• Added: per-device overrides. A pencil button next to each device's template (Device Manager) opens an Edit window with Notifications toggles, Line / Memory / Programmable Keys windows, default account ringtone and a custom key/value box. Only values that differ from the template are written, in a DEVICE OVERRIDES block at the end of the phone's .cfg; template saves and rebuilds preserve it.
+• Changed: turning a phone's VPN off now points openvpn.url at PhoneSettings/fakekeys/null.tar instead of clearing it, so the phone stops retrying without a reboot. install.php creates the empty null.tar; uninstall.php removes it.
+• Added: TFTP check on install and a banner on the module page (with a click-to-copy command) when TFTP is missing or not running; install_tftp.sh installs TFTP, links /tftpboot into /var/www/html, sets permissions and opens UDP 69.
+
+1.1.6
+• Fixed: ringtone filenames are lowercased on upload and ordered alphabetically (case-insensitive) so numeric slots match the phone's own ordering.
+• Changed:T28 models stay on numeric ringer values since it's not working properly on ringtone filename; other models use the ringtone filename. If you encounter issues with other models, make a bug report with how many built-in ringtones on the model and that'll be switched.
+• Changed: distinctive ringtone lines now write the ringtone filename (ringer = ring_att3.wav) instead of a numeric index, avoiding per-model factory counts and ordering. EPM_RINGER_BY_NAME / a per-model list in scripts.yealink_epm.php reverts to indexes if a model does not honor filenames.
+• Added: Notifications button opening a dialog with toggle switches for Voice Mail / Missed Call / Forward Call / Text Message popups.
+• Fixed: deleting a ringtone now raises the same flush banner as unchecking one.
+• Fixed: stray DISTINCTIVE RINGTONE marker comments no longer leak into Template Custom Key / Value Additions (existing ones are cleaned on save).
+
+1.1.5
+• Fixed: JPG/PNG/BMP phone wallpapers, .dob logos still use lcd_logo.url; the "system" option writes "phone_setting.backgrounds = Default:1.png". 
+• Fixed: expansion module wallpaper now writes "expansion_module.backgrounds = Config:<file>". Phone and expansion module wallpapers are selected independently and can be different images; when they differ both wallpaper_upload.url lines are written (module first, phone last).
+• Fixed: Auto-provision keys now match the phone's firmware generation. The Global Legacy Base file (y000000000000.cfg, e.g. SIP-T28P) 
+• Fixed: SIP server parameters now match the phone's firmware generation. SIP-T28P (legacy) keeps account.1.sip_server / sip_server_host / sip_server_port; all other models get account.1.sip_server.1.address and account.1.sip_server.1.port. Manual/generic templates (unknown model) write both sets. Applies to templates, newly scanned/assigned devices and extension changes, and rebuilding devices from a template re-emits the device's SIP server lines in the naming its template's model needs.
+• Fixed: Dial Now delay is now written as phone_setting.dialnow_delay (was phone_setting.inter_digit_time); label renamed "Dial Now Delay". Old configs using inter_digit_time still load.
+• Fixed: Dial Now rules were written as "dialnow.item.N" (legacy/not honored); they now write "dialplan.dialnow.rule.N" + "dialplan.dialnow.line_id.N = 0". Existing global configs using dialnow.item.N still load.
+• When a programmable key's type is changed away from one that used Line, Value, History or (for SoftKey 1-4) Label - including reverting back to the default type - any of those fields no longer used by the new type are now explicitly cleared (%NULL%) in the generated config, instead of leaving the phone with the previous type's stale value.
+• Fixed bug if changing key value away from default then back to default, it wasn't registering.
+• Added programmable field restrictions depending on what "type" was selected. 
+
 1.1.4
 • Line Keys and Memory Keys can now be reordered: drag a key's number to move it (the row numbers/config slots stay put, only the data inside them moves), or use the new Sort buttons to sort all keys by Extension (numeric) or Label (alphabetical), ascending or descending. Blank keys always sort to the end. Line Key 1 (the account/extension key) is excluded from both dragging and sorting since it's fixed.
 • The Extension field on Line Keys and Memory Keys is now restricted to whole numbers (digits only) as you type.
 • Removed the unused Extension field from Programmable Keys (it wasn't used by any current key type there); the "Number/URL" Value field is unaffected.
 • Programmable Keys is now split into two tabs: Hard Keys (nav keys, CONF/Hold/Mute/TRAN/Redial/Message, etc.) and Soft Keys (SoftKey 1-4).
-• Adjusted ringtone loop to use an icon instead of a checkbox/text.
-• Replaced all the browser confirm alerts with custom alerts to avoid the check to ignore browser option that breaks the function
-• Tracking why subnet scanner still not working correctly on OpenVPN subnet.
+
 
 1.1.3
 • Memory keys now have Type, Label and Line fields alongside Extension and Pickup, matching the Line Keys editor (memorykey.X.type / .label / .line are generated and parsed back from templates).

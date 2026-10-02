@@ -129,6 +129,18 @@ foreach ($htaccess_files as $htaccess_path) {
 }
 
 // ============================================================================
+// 3b. REMOVE THE FAKEKEYS PLACEHOLDER (empty null.tar created by install.php)
+// ============================================================================
+$fakekeys_dir = $phone_settings_dir . '/fakekeys';
+if (is_file($fakekeys_dir . '/null.tar')) {
+    @unlink($fakekeys_dir . '/null.tar');
+    out("Removed {$fakekeys_dir}/null.tar");
+}
+if (is_dir($fakekeys_dir) && !is_link($fakekeys_dir)) {
+    @rmdir($fakekeys_dir);   // only succeeds when empty
+}
+
+// ============================================================================
 // 4. REMOVE PHONESETTINGS ONLY IF IT IS EMPTY
 // ============================================================================
 // PhoneSettings holds the user's logos, ringtones and VPN keys, so it is only
@@ -154,7 +166,7 @@ if (is_link($phone_settings_dir)) {
         out("PhoneSettings is a symlink to {$link_target}, which is not empty - leaving it in place (not removed).");
     }
 } elseif (is_dir($phone_settings_dir)) {
-    $module_subdirs = ['logo', 'ringtones', 'vpnkeys'];   // created by install.php
+    $module_subdirs = ['logo', 'ringtones', 'vpnkeys', 'fakekeys'];   // created by install.php
     $entries = @scandir($phone_settings_dir);
     $removable = ($entries !== false);
 

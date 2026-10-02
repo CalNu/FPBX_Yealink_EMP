@@ -43,7 +43,7 @@ if ($tftp_state === 'running') {
 } else {
     out("<warning>TFTP is " . ($tftp_state === 'installed' ? "installed but not running" : "not installed") . " on this server. "
       . "Creating the {$tftp_dir} folder so the module can still generate configs; to install and configure TFTP run: "
-      . "bash {$module_root}/install_tftp.sh</warning>");
+      . "bash {$module_root}/scripts/install_tftp.sh</warning>");
 }
 
 // Module installs normally run as the "asterisk" user, which is not allowed to create folders
@@ -65,7 +65,7 @@ if (!is_dir($tftp_dir)) {
     } else {
         out("<warning>Could not create {$tftp_dir}: the installer does not have permission to write under /. "
           . "Run this once as root - it creates {$tftp_dir} and every link that lives inside it: "
-          . "bash {$module_root}/install_tftp.sh</warning>");
+          . "bash {$module_root}/scripts/install_tftp.sh</warning>");
     }
 }
 $tftp_root_ok = is_dir($tftp_dir);

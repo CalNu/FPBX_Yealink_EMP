@@ -11,7 +11,7 @@ if (!defined('FREEPBX_IS_AUTH')) {
 $epm_tftp_state = function_exists('epm_tftp_status') ? epm_tftp_status() : 'running';
 $epm_tftp_dir_missing = !is_dir('/tftpboot');
 if ($epm_tftp_state !== 'running' || $epm_tftp_dir_missing):
-    $epm_tftp_cmd = 'bash ' . rtrim(realpath(__DIR__) ?: __DIR__, '/') . '/install_tftp.sh';
+    $epm_tftp_cmd = 'bash ' . rtrim(realpath(__DIR__) ?: __DIR__, '/') . '/scripts/install_tftp.sh';
 ?>
 <div style="background:#fff4e5; border:1px solid #f0b35a; border-left:5px solid #e8890c; border-radius:4px; padding:12px 16px; margin:10px 0 14px 0; color:#5a3a00; font-family: Arial, Helvetica, sans-serif;">
     <strong><?php
@@ -27,7 +27,7 @@ if ($epm_tftp_state !== 'running' || $epm_tftp_dir_missing):
         <span><?= htmlspecialchars($epm_tftp_cmd) ?></span>
         <span class="epm-tftp-copy" style="flex:0 0 auto; font-size:11px; opacity:.75;"><i class="fa fa-clipboard" aria-hidden="true"></i> Click to copy</span>
     </div>
-    <div style="margin-top:6px; font-size:12px; opacity:.85;">It creates /tftpboot and the module's links, installs the TFTP server, links /tftpboot into /var/www/html, sets file permissions and opens UDP 69 in the firewall. Reload this page afterwards.</div>
+    <div style="margin-top:6px; font-size:12px; opacity:.85;">It creates /tftpboot and the module's links, installs the TFTP server, links /tftpboot into /var/www/html, sets file permissions and opens UDP 69 in the firewall. It also pre-authorizes the web server user to move the HTTP provisioning port (only used if you later redirect HTTP to HTTPS), so no separate setup step is needed for that. Reload this page afterwards.</div>
 </div>
 <script>
 function epmCopyTftpCmd(box) {
@@ -49,6 +49,106 @@ function epmCopyTftpCmd(box) {
     if (navigator.clipboard && window.isSecureContext) {
         navigator.clipboard.writeText(cmd).then(function () { done(true); }, fallback);
     } else { fallback(); }
+}
+</script>
+<?php endif; ?>
+
+<?php
+// http -> https redirect is on but nothing usable serves provisioning on the chosen port
+if (!empty($sysadmin_redirect) && is_array($epm_prov_port_state) && $epm_prov_port_state['state'] !== 'serving'):
+    $epm_pp = (int)yealink_epm_prov_port();
+    $epm_ctl_state = ($epm_prov_port_state['state'] === 'in_use') ? '' : epm_ctl_status();
+    $epm_pp_cmd = 'bash ' . rtrim(realpath(__DIR__) ?: __DIR__, '/') . '/scripts/setup-root.sh';
+?>
+<div id="epm_provport_banner" style="background:#fff4e5; border:1px solid #f0b35a; border-left:5px solid #e8890c; border-radius:4px; padding:12px 16px; margin:10px 0 14px 0; color:#5a3a00; font-family: Arial, Helvetica, sans-serif;">
+    <strong>HTTP is being redirected to HTTPS, but phones have nothing to download from on port <?= $epm_pp ?>.</strong>
+    <?php if ($epm_prov_port_state['state'] === 'in_use'): ?>
+        <?= htmlspecialchars($epm_prov_port_state['message']) ?> Choose another port in Global Settings (next to PBX Server IP) and save.
+    <?php elseif ($epm_prov_port_state['state'] === 'redirected' && $epm_ctl_state === 'ready'): ?>
+        <?= htmlspecialchars($epm_prov_port_state['message']) ?>
+        <div style="margin-top:8px;">
+            <button type="button" id="epm_provport_apply" class="gen-btn" style="margin-top:0; background:#e8890c;" onclick="epmApplyProvPort(<?= $epm_pp ?>)">Re-apply port <?= $epm_pp ?> setup</button>
+            <button type="button" class="gen-btn" style="margin-top:0; background:#17a2b8;" onclick="epmDiagnoseRedirect()">Find the redirect rule</button>
+            <span id="epm_provport_msg" style="margin-left:10px; font-size:13px;"></span>
+        </div>
+        <pre id="epm_provport_diag" style="display:none; margin-top:8px; max-height:220px; overflow:auto; background:#1e1e1e; color:#e6e6e6; padding:9px 12px; border-radius:4px; font-size:12px; white-space:pre-wrap; word-break:break-all;"></pre>
+    <?php elseif ($epm_ctl_state === 'ready'): ?>
+        Provisioning, VPN key, ringtone and logo downloads are pointed at port <?= $epm_pp ?>. Apache needs to serve /PhoneSettings and /tftpboot there over plain HTTP.
+        <div style="margin-top:8px;">
+            <button type="button" id="epm_provport_apply" class="gen-btn" style="margin-top:0; background:#e8890c;" onclick="epmApplyProvPort(<?= $epm_pp ?>)">Set up port <?= $epm_pp ?> now</button>
+            <span id="epm_provport_msg" style="margin-left:10px; font-size:13px;"></span>
+        </div>
+        <div style="margin-top:6px; font-size:12px; opacity:.85;">Adds an Apache listener that serves only /PhoneSettings and /tftpboot, and opens the port in ufw/firewalld if one is active. Saving Global Settings does the same automatically.</div>
+    <?php else: ?>
+        Provisioning, VPN key, ringtone and logo downloads are pointed at port <?= $epm_pp ?>, so Apache needs to serve /PhoneSettings and /tftpboot there over plain HTTP.
+        <?php $epm_ci = epm_ctl_info(); ?>
+        <?php if ($epm_ctl_state === 'outdated'): ?>The root helper on this server is older than this module.
+        <?php elseif ($epm_ctl_state === 'nosudo'): ?>The helper is installed, but the web server user<?= $epm_ci['user'] !== '' ? " ('" . htmlspecialchars($epm_ci['user']) . "')" : '' ?> isn't allowed to run it<?= $epm_ci['out'] !== '' ? ' (sudo said: ' . htmlspecialchars(mb_substr($epm_ci['out'], 0, 160)) . ')' : '' ?>; re-running the command below fixes that (it detects the user).
+        <?php else: ?>Changing Apache needs root once.<?php endif; ?>
+        Run this one-time command as root (click it to copy):
+        <div id="epm_provport_cmd" role="button" tabindex="0" title="Click to copy"
+             onclick="epmCopyProvCmd(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();epmCopyProvCmd(this);}"
+             data-cmd="<?= htmlspecialchars($epm_pp_cmd) ?>"
+             style="margin-top:8px; background:#1e1e1e; color:#e6e6e6; font-family:monospace; font-size:13px; padding:9px 12px; border-radius:4px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:12px; word-break:break-all;">
+            <span><?= htmlspecialchars($epm_pp_cmd) ?></span>
+            <span class="epm-provport-copy" style="flex:0 0 auto; font-size:11px; opacity:.75;"><i class="fa fa-clipboard" aria-hidden="true"></i> Click to copy</span>
+        </div>
+        <div style="margin-top:6px; font-size:12px; opacity:.85;">It installs a small root-owned helper and a narrow sudo rule so the web server user can change this one Apache listener. After that, changing the HTTP Shift Port is done from this page with no SSH. Reload this page afterwards.</div>
+    <?php endif; ?>
+</div>
+<script>
+function epmCopyProvCmd(box) {
+    var cmd = box.getAttribute('data-cmd'), tag = box.querySelector('.epm-provport-copy');
+    function done(ok) {
+        if (!tag) return;
+        tag.innerHTML = ok ? '<i class="fa fa-check"></i> Copied!' : 'Press Ctrl+C to copy';
+        setTimeout(function () { tag.innerHTML = '<i class="fa fa-clipboard" aria-hidden="true"></i> Click to copy'; }, 1800);
+    }
+    function fallback() {
+        var ta = document.createElement('textarea');
+        ta.value = cmd; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta);
+        done(ok);
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(cmd).then(function () { done(true); }, fallback);
+    } else { fallback(); }
+}
+function epmDiagnoseRedirect() {
+    var out = document.getElementById('epm_provport_diag');
+    if (!out) return;
+    out.style.display = 'block';
+    out.textContent = 'Looking...';
+    fetch('?display=yealink_epm&action=diagnose_redirect', { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { out.textContent = d.out || '(nothing found)'; })
+        .catch(function () { out.textContent = 'Request failed.'; });
+}
+function epmApplyProvPort(port) {
+    var btn = document.getElementById('epm_provport_apply'), msg = document.getElementById('epm_provport_msg');
+    if (btn) { btn.disabled = true; btn.innerText = 'Setting up...'; }
+    var fd = new FormData();
+    fd.append('port', port);
+    fetch('?display=yealink_epm&action=apply_prov_port', { method: 'POST', body: fd, credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (d.ok) {
+                if (msg) { msg.style.color = '#1e6b34'; msg.textContent = d.message + ' Reloading...'; }
+                setTimeout(function () {
+                    window.location.href = window.location.pathname + '?display=yealink_epm&tab=tab_global&_r=' + Date.now();
+                }, 1200);
+            } else {
+                if (btn) { btn.disabled = false; btn.innerText = 'Set up port ' + port + ' now'; }
+                if (msg) { msg.style.color = '#a31515'; msg.textContent = d.message || 'Failed.'; }
+            }
+        })
+        .catch(function () {
+            if (btn) { btn.disabled = false; btn.innerText = 'Set up port ' + port + ' now'; }
+            if (msg) { msg.style.color = '#a31515'; msg.textContent = 'Request failed.'; }
+        });
 }
 </script>
 <?php endif; ?>
@@ -154,6 +254,12 @@ function epmCopyTftpCmd(box) {
     .gen-tab-content.active { display: block; }
 
     .gen-modal { display: none; position: fixed; z-index: 999; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+    /* Animated variant (view config, subnet scan, manual add): same fade + scale/slide as the key/notification modals */
+    .gen-modal.epm-anim { display:block; visibility:hidden; opacity:0; pointer-events:none; transition:opacity .22s ease, visibility 0s linear .30s; }
+    .gen-modal.epm-anim.is-open { visibility:visible; opacity:1; pointer-events:auto; transition:opacity .22s ease, visibility 0s linear 0s; }
+    .gen-modal.epm-anim .gen-modal-content { opacity:0; transform:scale(.88) translateY(18px); transform-origin:center center; transition:transform .28s cubic-bezier(.2,.75,.25,1), opacity .22s ease; }
+    .gen-modal.epm-anim.is-open .gen-modal-content { opacity:1; transform:scale(1) translateY(0); }
+    @media (prefers-reduced-motion: reduce) { .gen-modal.epm-anim, .gen-modal.epm-anim .gen-modal-content { transition:none !important; } }
     .gen-modal-content { background: #fff; margin: 8% auto; padding: 20px; width: 65%; border-radius: 8px; max-height: 80vh; overflow-y: auto; }
     /* Key boxes (line keys / memory keys / programmable keys) */
     .gen-key-btn-reset { background: #6c757d; }
@@ -687,7 +793,7 @@ function toggleOvpnState(ext, mac, enable) {
         
         titleElem.innerText = mac.toLowerCase() + '.cfg';
         contentElem.value = 'Loading configuration file...';
-        document.getElementById('viewConfigModal').style.display = 'block';
+        document.getElementById('viewConfigModal').classList.add('is-open');
 
         fetch('?display=yealink_epm&action=view_mac_cfg&mac=' + encodeURIComponent(mac))
             .then(function(response) { return response.text(); })
@@ -700,7 +806,7 @@ function toggleOvpnState(ext, mac, enable) {
     }
 
     function closeViewConfigModal() {
-        document.getElementById('viewConfigModal').style.display = 'none';
+        document.getElementById('viewConfigModal').classList.remove('is-open');
     }
 
     function downloadSelectedTemplate() {
@@ -1159,6 +1265,7 @@ function toggleOvpnState(ext, mac, enable) {
     }
 
     var epmConfirmCallback = null;
+    var epmConfirmCancelCallback = null;
 
     function epmConfirm(message, onConfirm, opts) {
         var modal = document.getElementById('epmConfirmModal');
@@ -1167,6 +1274,7 @@ function toggleOvpnState(ext, mac, enable) {
         document.getElementById('epmConfirmModalTitle').textContent = (opts && opts.title) || 'Please confirm';
         document.getElementById('epmConfirmModalOk').textContent = (opts && opts.okLabel) || 'OK';
         epmConfirmCallback = (typeof onConfirm === 'function') ? onConfirm : null;
+        epmConfirmCancelCallback = (opts && typeof opts.onCancel === 'function') ? opts.onCancel : null;
         modal.style.display = 'flex';
         modal.setAttribute('aria-hidden', 'false');
         var cancel = document.getElementById('epmConfirmModalCancel');
@@ -1180,8 +1288,11 @@ function toggleOvpnState(ext, mac, enable) {
             modal.setAttribute('aria-hidden', 'true');
         }
         var cb = epmConfirmCallback;
+        var cancelCb = epmConfirmCancelCallback;
         epmConfirmCallback = null;
+        epmConfirmCancelCallback = null;
         if (result && cb) cb();
+        else if (!result && cancelCb) cancelCb();
     }
 
     var epmPendingDelete = null;
@@ -1490,12 +1601,66 @@ function toggleOvpnState(ext, mac, enable) {
 
     function enableMacEdit(mac) {
         var inputElem = document.getElementById('mac_input_' + mac);
-        if (inputElem) {
-            inputElem.readOnly = false;
-            inputElem.style.backgroundColor = '#ffffff';
-            inputElem.style.borderColor = '#007bff';
-            inputElem.focus();
+        if (!inputElem) return;
+        var original = mac;
+        var done = false;
+
+        function finish(revert) {
+            if (done) return;
+            done = true;
+            if (revert) { inputElem.value = original; }
+            inputElem.readOnly = true;
+            inputElem.style.backgroundColor = '#e9ecef';
+            inputElem.style.borderColor = '#ccc';
         }
+
+        function commit() {
+            var clean = inputElem.value.toLowerCase().replace(/[^a-f0-9]/g, '');
+            if (clean === original) { finish(true); return; }
+            if (clean.length !== 12) {
+                finish(true);
+                epmAlert('A MAC address must be exactly 12 hexadecimal characters.');
+                return;
+            }
+            // Lock the field while the in-page confirmation is open so blur can't fire a second commit.
+            done = true;
+            inputElem.value = clean;
+            inputElem.readOnly = true;
+            epmConfirm('Change MAC address from ' + original + ' to ' + clean + '? The configuration, template and extension are kept. If VPN is enabled, its key file is renamed too.',
+                function () { runRename(clean); },
+                { title: 'Change MAC Address', okLabel: 'Change MAC', onCancel: function () { done = false; finish(true); } });
+        }
+
+        function runRename(clean) {
+            fetch('?display=yealink_epm&action=rename_device_mac&old=' + encodeURIComponent(original) + '&new=' + encodeURIComponent(clean))
+                .then(function (r) { return r.json(); })
+                .then(function (j) {
+                    if (j.status !== 'success') {
+                        done = false;
+                        finish(true);
+                        epmAlert(j.message || 'MAC address change failed.');
+                        return;
+                    }
+                    epmStore(EPM_TAB_KEY, 'tab_devices');
+                    window.location.replace(window.location.pathname + window.location.search);
+                })
+                .catch(function () {
+                    done = false;
+                    finish(true);
+                    epmAlert('MAC address change failed: no response from the server.');
+                });
+        }
+
+        inputElem.readOnly = false;
+        inputElem.style.backgroundColor = '#ffffff';
+        inputElem.style.borderColor = '#007bff';
+        inputElem.onkeydown = function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); commit(); }
+            else if (e.key === 'Escape') { e.preventDefault(); finish(true); }
+        };
+        inputElem.onblur = function () { if (!done) commit(); };
+        inputElem.focus();
+        inputElem.select();
     }
 
     function applyBulkTemplateToScanned(selectedTpl) {
@@ -1782,13 +1947,127 @@ function toggleOvpnState(ext, mac, enable) {
     }
 
     function openScanModal() {
-        document.getElementById('scanModal').style.display = 'block';
+        document.getElementById('scanModal').classList.add('is-open');
+    }
+
+    // ---- HTTP shift-port box: suggestions on click, live in-use check ----------------------
+    (function () {
+        var input  = null, menu = null, status = null, timer = null, seq = 0;
+        var inUse   = <?= json_encode(array_values(epm_listening_tcp_ports())) ?>;
+        var saved   = <?= (int)yealink_epm_prov_port() ?>;
+        var savedServing = <?= (!empty($epm_prov_port_state) && is_array($epm_prov_port_state) && $epm_prov_port_state['state'] === 'serving') ? 'true' : 'false' ?>;
+        var redirect = <?= !empty($sysadmin_redirect) ? 'true' : 'false' ?>;
+        var candidates = [83, 8083, 8084, 8085, 8088, 8090, 8181, 8888];
+
+        function paint(kind, text) {
+            var colors = { ok: '#1e6b34', warn: '#a31515', info: '#7a5200', mute: '#555' };
+            status.innerHTML = '';
+            var span = document.createElement('span');
+            span.style.color = colors[kind] || colors.mute;
+            span.style.fontWeight = (kind === 'warn') ? 'bold' : 'normal';
+            span.textContent = text;
+            status.appendChild(span);
+            input.style.borderColor = (kind === 'warn') ? '#a31515' : '';
+        }
+
+        function check() {
+            var v = input.value.trim();
+            var n = ++seq;
+            if (!/^\d{1,5}$/.test(v) || +v < 1 || +v > 65535 || +v === 80 || +v === 443) {
+                paint('warn', 'Port must be a number from 1 to 65535 (not 80 or 443).');
+                return;
+            }
+            paint('mute', 'Checking port ' + v + '...');
+            fetch('?display=yealink_epm&action=check_prov_port&port=' + encodeURIComponent(v), { credentials: 'same-origin' })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (n !== seq) { return; }
+                    var tail = redirect ? '' : ' (Only used if an HTTP\u2192HTTPS redirect is detected.)';
+                    if (d.state === 'in_use' || d.state === 'redirected') { paint('warn', '\u26A0 ' + d.message); }
+                    else if (d.state === 'serving') { paint('ok', '\u2713 ' + d.message + tail); }
+                    else if (d.state === 'free')    { paint('info', d.message + tail); }
+                    else                            { paint('warn', d.message); }
+                })
+                .catch(function () { if (n === seq) { paint('mute', 'Could not check this port right now.'); } });
+        }
+
+        function buildMenu() {
+            var current = input.value.trim();
+            var items = candidates.slice();
+            if (items.indexOf(saved) === -1) { items.unshift(saved); }
+            items.sort(function (a, b) {
+                var ua = inUse.indexOf(a) !== -1 && !(a === saved && savedServing);
+                var ub = inUse.indexOf(b) !== -1 && !(b === saved && savedServing);
+                return (ua - ub) || (a - b);
+            });
+            menu.innerHTML = '';
+            var head = document.createElement('div');
+            head.textContent = 'Suggested ports';
+            head.style.cssText = 'padding:4px 8px; background:#f2f2f2; font-weight:bold; border-bottom:1px solid #ddd;';
+            menu.appendChild(head);
+            items.forEach(function (p) {
+                var used = inUse.indexOf(p) !== -1 && !(p === saved && savedServing);
+                var row = document.createElement('div');
+                row.style.cssText = 'padding:5px 8px; cursor:pointer; display:flex; justify-content:space-between; gap:8px;' + (used ? 'color:#a31515;' : '');
+                var left = document.createElement('span'); left.textContent = p;
+                var right = document.createElement('span'); right.style.cssText = 'font-size:11px; opacity:.85;';
+                right.textContent = used ? 'in use'
+                    : (p === saved && savedServing) ? 'serving'
+                    : (p === 83) ? 'default' : 'free';
+                if (String(p) === current) { row.style.background = '#e8f1ff'; }
+                row.appendChild(left); row.appendChild(right);
+                row.addEventListener('mousedown', function (e) {
+                    e.preventDefault();
+                    input.value = p;
+                    menu.style.display = 'none';
+                    if (input.closest && input.closest('.epm-box')) { input.closest('.epm-box').style.overflow = ''; }
+                    check();
+                });
+                row.addEventListener('mouseover', function () { row.style.background = '#eef3fb'; });
+                row.addEventListener('mouseout',  function () { row.style.background = (String(p) === input.value.trim()) ? '#e8f1ff' : ''; });
+                menu.appendChild(row);
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            input  = document.getElementById('prov_http_port');
+            menu   = document.getElementById('prov_port_menu');
+            status = document.getElementById('prov_port_status');
+            if (!input || !menu || !status) { return; }
+            // .epm-box clips overflow; let the suggestion list spill out while it is open.
+            var box = input.closest ? input.closest('.epm-box') : null;
+            function showMenu() { buildMenu(); if (box) { box.style.overflow = 'visible'; } menu.style.display = 'block'; }
+            function hideMenu() { menu.style.display = 'none'; if (box) { box.style.overflow = ''; } }
+            input.addEventListener('focus', showMenu);
+            input.addEventListener('click', showMenu);
+            input.addEventListener('blur',  function () { setTimeout(hideMenu, 120); });
+            input.addEventListener('input', function () {
+                input.value = input.value.replace(/[^0-9]/g, '');
+                buildMenu();
+                clearTimeout(timer);
+                timer = setTimeout(check, 350);
+            });
+            input.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') { hideMenu(); }
+                if (e.key === 'Enter')  { e.preventDefault(); hideMenu(); check(); }
+            });
+        });
+    })();
+
+    // Set once a device is actually added; the Device Manager list only needs a reload then.
+    var epmDevicesChanged = false;
+
+    function epmReloadDevicesIfChanged() {
+        if (!epmDevicesChanged) { return; }
+        epmStore(EPM_TAB_KEY, 'tab_devices');
+        // &tab= lets the server render Device Manager as the active tab from the first paint
+        // (no flash of Global Settings before the script switches tabs).
+        window.location.href = window.location.pathname + '?display=yealink_epm&tab=tab_devices&_r=' + Date.now();
     }
 
     function closeScanModal() {
-        document.getElementById('scanModal').style.display = 'none';
-        epmStore(EPM_TAB_KEY, 'tab_devices');
-        window.location.href = window.location.pathname + '?display=yealink_epm&_r=' + Date.now();
+        document.getElementById('scanModal').classList.remove('is-open');
+        epmReloadDevicesIfChanged();
     }
 
     function openManualAddModal() {
@@ -1796,7 +2075,7 @@ function toggleOvpnState(ext, mac, enable) {
         validateManualMacPrefix();
         document.getElementById('manual_ext').value = '';
         document.getElementById('manual_tpl').value = '';
-        document.getElementById('manualAddModal').style.display = 'block';
+        document.getElementById('manualAddModal').classList.add('is-open');
         enforceUniqueExtensionSelections();
     }
 
@@ -1810,9 +2089,8 @@ function toggleOvpnState(ext, mac, enable) {
     }
 
     function closeManualAddModal() {
-        document.getElementById('manualAddModal').style.display = 'none';
-        epmStore(EPM_TAB_KEY, 'tab_devices');
-        window.location.href = window.location.pathname + '?display=yealink_epm&_r=' + Date.now();
+        document.getElementById('manualAddModal').classList.remove('is-open');
+        epmReloadDevicesIfChanged();
     }
 
     function submitManualAddDevice() {
@@ -1852,6 +2130,7 @@ function toggleOvpnState(ext, mac, enable) {
             if (data.status === 'success') {
                 btn.innerText = 'Created!';
                 btn.style.background = '#6c757d';
+                epmDevicesChanged = true;
                 setTimeout(() => { closeManualAddModal(); }, 600);
             } else {
                 epmAlert(data.message || 'Error adding device.');
@@ -1975,6 +2254,7 @@ function toggleOvpnState(ext, mac, enable) {
                 if (row) row.style.background = '#d4edda';
                 btn.innerHTML = 'Added &#10003;';
                 btn.style.background = '#6c757d';
+                epmDevicesChanged = true;
                 enforceUniqueExtensionSelections();
             } else {
                 epmAlert(data.message || 'Error adding device.');
@@ -2041,8 +2321,9 @@ function toggleOvpnState(ext, mac, enable) {
         // Tidy the address bar: drop any #anchor and the one-off ?_r= cache-buster.
         try {
             var epmUrl = new URL(window.location.href);
-            if (epmUrl.hash !== '' || epmUrl.searchParams.has('_r')) {
+            if (epmUrl.hash !== '' || epmUrl.searchParams.has('_r') || epmUrl.searchParams.has('tab')) {
                 epmUrl.searchParams.delete('_r');
+                epmUrl.searchParams.delete('tab');
                 window.history.replaceState(null, '', epmUrl.pathname + epmUrl.search);
             }
         } catch (e) {}
@@ -2257,7 +2538,7 @@ var epmOv = (function () {
         });
         h += '</div><div class="epm-ov-h">Keys</div><div class="epm-ov-btnrow">' +
              '<button type="button" class="gen-btn" onclick="openEpmKeyModal(\'epmOvLine\')">Line Keys</button>' +
-             '<button type="button" class="gen-btn" onclick="openEpmKeyModal(\'epmOvMem\')">Memory Keys</button>' +
+             (data.memkeys.length ? '<button type="button" class="gen-btn" onclick="openEpmKeyModal(\'epmOvMem\')">Memory Keys</button>' : '') +
              (data.prog.length ? '<button type="button" class="gen-btn" onclick="openEpmKeyModal(\'epmOvProg\')">Programmable Keys</button>' : '') +
              '</div><div class="epm-ov-h">Default Account Ringtone</div><select class="epm-ov-sel" id="epm_ov_ring">';
         data.ringtones.builtin.forEach(function (r) { h += '<option value="' + esc(r[0]) + '"' + (r[0] === data.ringtone ? ' selected' : '') + '>' + esc(r[1]) + '</option>'; });
@@ -2285,23 +2566,27 @@ var epmOv = (function () {
         return rows;
     }
 
+    var opening = false;
     function open(m) {
+        if (opening) return;
+        opening = true;
         ensure();
         mac = m;
-        el('epmOvMain_title').textContent = 'Device Overrides - ' + m.toUpperCase();
-        el('epm_ov_msg').textContent = 'Loading...';
-        el('epm_ov_main_body').innerHTML = '';
-        openEpmKeyModal('epmOvMain');
+        // Load and render BEFORE showing, so the window opens once at its final size
+        // instead of flashing an empty "Loading..." shell and then resizing.
         fetch('?display=yealink_epm&action=get_device_overrides&mac=' + encodeURIComponent(m))
             .then(function (r) { return r.json(); })
             .then(function (j) {
-                if (j.error) { el('epm_ov_msg').textContent = j.error; return; }
+                if (j.error) { epmAlert(j.error); return; }
                 data = j;
                 el('epmOvMain_title').textContent = 'Device Overrides - ' + (j.ext ? 'Ext ' + j.ext + ' - ' : '') + j.model + ' (' + m.toUpperCase() + ')';
                 el('epm_ov_msg').textContent = '';
                 render();
+                void el('epmOvMain').offsetWidth; // commit hidden state so the open animation always plays
+                openEpmKeyModal('epmOvMain');
             })
-            .catch(function (e) { el('epm_ov_msg').textContent = 'Load failed: ' + e; });
+            .catch(function (e) { epmAlert('Load failed: ' + e); })
+            .then(function () { opening = false; });
     }
 
     function save(sync) {
@@ -2325,7 +2610,7 @@ var epmOv = (function () {
                 var msg = j.lines + ' override line' + (j.lines === 1 ? '' : 's') + ' saved' + (j.synced ? ', check-sync sent' : '') + (j.dropped ? ' (' + j.dropped + ' invalid custom line dropped)' : '') + '.';
                 el('epm_ov_msg').textContent = msg;
                 var eb = document.querySelector('.epm-ov-edit-btn[onclick*="epmOv.open(\'' + mac + '\')"]');
-                if (eb) { eb.classList.toggle('has-ov', j.lines > 0); eb.title = j.lines > 0 ? 'Edit device overrides (this phone has overrides)' : 'Edit device overrides'; }
+                if (eb) { eb.classList.toggle('has-ov', j.lines > 0); eb.title = 'Edit Template Overrides'; }
                 setTimeout(function () { closeEpmKeyModal('epmOvMain'); }, 1000);
             })
             .catch(function (e) { el('epm_ov_msg').textContent = 'Save failed: ' + e; });
@@ -2445,10 +2730,10 @@ var epmOv = (function () {
 </div>
 
 <!-- MODALS -->
-<div id="viewConfigModal" class="gen-modal">
+<div id="viewConfigModal" class="gen-modal epm-anim" aria-hidden="true">
     <div class="gen-modal-content" style="width: 700px;">
         <h3>Device Configuration (<span id="view_cfg_mac_title"></span>)</h3>
-        <textarea id="view_cfg_content" readonly class="gen-textarea shadow-box" style="height: 400px; font-size: 12px; background: #f8f9fa;"></textarea>
+        <textarea id="view_cfg_content" readonly class="gen-textarea shadow-box" style="height: 400px; font-size: 12px; background: #f3f3f3; border: 1px solid #a6d18f;"></textarea>
         <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
             <button type="button" class="gen-btn-danger" style="margin: 0;" onclick="closeViewConfigModal()">Close</button>
         </div>
@@ -2484,7 +2769,7 @@ var epmOv = (function () {
     </div>
 </div>
 
-<div id="scanModal" class="gen-modal">
+<div id="scanModal" class="gen-modal epm-anim" aria-hidden="true">
     <div class="gen-modal-content">
         <h3>Subnet MAC Address Scanner (Yealink)</h3>
         
@@ -2534,7 +2819,7 @@ var epmOv = (function () {
     </div>
 </div>
 
-<div id="manualAddModal" class="gen-modal">
+<div id="manualAddModal" class="gen-modal epm-anim" aria-hidden="true">
     <div class="gen-modal-content" style="width: 450px;">
         <h3>Manually Add Phone Device</h3>
         
@@ -2696,8 +2981,23 @@ var epmOv = (function () {
                     <div class="epm-box-body box-bg">
                         <div class="epm-template-fields epm-template-two-col">
                             <div>
-                                <label>PBX Server IP / Domain:</label>
-                                <input type="text" class="shadow-box gen-full-width" name="server_ip" placeholder="<?= $default_server_target ?>" value="<?= htmlspecialchars($formData['server_ip']) ?>">
+                                <div style="display:flex; gap:10px; align-items:flex-start;">
+                                    <div style="flex:1 1 auto; min-width:0;">
+                                        <label>PBX Server IP / Domain:</label>
+                                        <input type="text" class="shadow-box gen-full-width" name="server_ip" placeholder="<?= $default_server_target ?>" value="<?= htmlspecialchars($formData['server_ip']) ?>">
+                                        <?php if (!empty($sysadmin_redirect)): ?>
+                                        <div id="prov_port_status" style="margin-top:4px; font-size:12px; line-height:1.35;"></div>
+                                        <?php endif; ?>
+                                    </div>
+                                    <?php if (!empty($sysadmin_redirect)): // only shown while http->https forwarding is detected (re-checked on every page load) ?>
+                                    <div style="flex:0 0 120px; position:relative;">
+                                        <?php $epm_port_tip = 'HTTP&rarr;HTTPS redirect detected: phone download URLs use port ' . (int)yealink_epm_prov_port() . '.'; ?>
+                                        <label title="<?= $epm_port_tip ?>">HTTP Shift Port:</label>
+                                        <input type="text" id="prov_http_port" name="prov_http_port" title="<?= $epm_port_tip ?>" class="shadow-box gen-full-width" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="83" value="<?= htmlspecialchars($formData['prov_http_port']) ?>">
+                                        <div id="prov_port_menu" style="display:none; position:absolute; left:0; right:0; top:100%; z-index:50; background:#fff; border:1px solid #888; border-radius:4px; box-shadow:0 4px 10px rgba(0,0,0,.25); max-height:200px; overflow-y:auto; font-size:12px;"></div>
+                                    </div>
+                                    <?php endif; ?>
+                                </div>
                             </div>
                             <div>
                                 <label>Phone Web GUI Admin Password:</label>
@@ -3695,10 +3995,10 @@ var epmOv = (function () {
                                                name="edited_mac[<?= htmlspecialchars($dev['mac']) ?>]" 
                                                value="<?= htmlspecialchars($dev['mac']) ?>" 
                                                readonly 
-					       style="padding:4px; font-weight:bold; width:120px; font-family:monospace; text-transform:lowercase; border-radius:4px; border:1px solid #ccc; background-color:#e9ecef; box-shadow: 0 0 8px #307847">
+					       style="padding:4px; font-weight:bold; width:100px; font-family:monospace; text-transform:lowercase; border-radius:4px; border:1px solid #ccc; background-color:#e9ecef; box-shadow: 0 0 8px #307847">
                                         
                                         <button type="button" 
-                                                title="Edit MAC Address" 
+                                                title="Edit MAC Address" aria-label="Edit MAC Address" 
                                                 onclick="enableMacEdit('<?= htmlspecialchars($dev['mac']) ?>')" 
                                                 style="background:none; border:none; cursor:pointer; padding:2px 4px; display:inline-flex; align-items:center;">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -3708,7 +4008,7 @@ var epmOv = (function () {
                                         </button>
 
                                         <button type="button" 
-                                                title="View Config File" 
+                                                title="View Current CFG" aria-label="View Current CFG" 
                                                 onclick="openViewConfigModal('<?= htmlspecialchars($dev['mac']) ?>')" 
                                                 style="background:none; border:none; cursor:pointer; padding:2px 4px; display:inline-flex; align-items:center; color:#007bff;">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -3735,7 +4035,7 @@ var epmOv = (function () {
                                             <option value="<?= htmlspecialchars($tpl_file) ?>" <?= ($dev['template'] === $tpl_file) ? 'selected' : '' ?>><?= htmlspecialchars($tpl_label) ?></option>
                                         <?php endforeach; ?>
                                     </select>
-                                    <button type="button" class="epm-ov-edit-btn<?= !empty($dev['has_overrides']) ? ' has-ov' : '' ?>" title="<?= !empty($dev['has_overrides']) ? 'Edit device overrides (this phone has overrides)' : 'Edit device overrides' ?>" onclick="epmOv.open('<?= htmlspecialchars($dev['mac']) ?>')"><i class="fa fa-pencil" aria-hidden="true"></i></button>
+                                    <button type="button" class="epm-ov-edit-btn<?= !empty($dev['has_overrides']) ? ' has-ov' : '' ?>" title="Edit Template Overrides" aria-label="Edit Template Overrides" onclick="epmOv.open('<?= htmlspecialchars($dev['mac']) ?>')"><i class="fa fa-pencil" aria-hidden="true"></i></button>
                                     </div>
                                 </td>
                                 <td>

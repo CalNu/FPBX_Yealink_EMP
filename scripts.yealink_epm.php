@@ -200,18 +200,258 @@ $detected_tz_info = $yealink_tz_mapping[$server_tz_identifier] ?? ['offset' => '
 // HTTP is forced to redirect to HTTPS. What actually matters for phones is
 // simply whether something is listening on that HTTP provisioning port, so
 // we test that directly instead of trusting a config flag.
-$sysadmin_redirect = false;
-$http_prov_probe = @fsockopen('127.0.0.1', 83, $errno, $errstr, 0.5);
-if ($http_prov_probe) {
-    @fclose($http_prov_probe);
-    $sysadmin_redirect = true;
+$sysadmin_redirect = false;   // decided below, once $detected_host is known
+
+// ---------------------------------------------------------------------------
+// HTTP provisioning port. When http://<server>/PhoneSettings (or /tftpboot) is being
+// forwarded to https, phones can't download from port 80, so every http:// URL the module
+// writes (provisioning, vpn.tar, ringtones, logo/wallpaper) is shifted to this port. It is
+// user-selectable (Global Settings, next to PBX Server IP) and defaults to 83. It only
+// takes effect while a redirect is detected - the detection runs on every page load.
+// Stored in a small dotfile so it is known before the global .cfg is parsed.
+// ---------------------------------------------------------------------------
+function yealink_epm_prov_port($set = null) {
+    static $port = 83;
+    if ($set !== null) { $port = (int)$set; }
+    return $port;
+}
+function yealink_epm_settings_path() {
+    return '/tftpboot/.yealink_epm_settings.json';
+}
+function yealink_epm_valid_port($p) {
+    $p = trim((string)$p);
+    return preg_match('/^\d{1,5}$/', $p) === 1 && (int)$p >= 1 && (int)$p <= 65535
+        && !in_array((int)$p, [80, 443], true);
+}
+function yealink_epm_load_prov_port() {
+    $f = yealink_epm_settings_path();
+    if (is_file($f)) {
+        $j = json_decode((string)@file_get_contents($f), true);
+        if (is_array($j) && isset($j['prov_http_port']) && yealink_epm_valid_port($j['prov_http_port'])) {
+            return (int)$j['prov_http_port'];
+        }
+    }
+    return 83;
+}
+function yealink_epm_save_prov_port($port) {
+    $f = yealink_epm_settings_path();
+    $j = is_file($f) ? json_decode((string)@file_get_contents($f), true) : [];
+    if (!is_array($j)) { $j = []; }
+    $j['prov_http_port'] = (int)$port;
+    $ok = @file_put_contents($f, json_encode($j)) !== false;
+    if ($ok) {
+        @chown($f, 'asterisk');
+        @chmod($f, 0664);
+    }
+    return $ok;
+}
+
+yealink_epm_prov_port(yealink_epm_load_prov_port());
+$epm_prov_port_notice = '';
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset($_POST['save_global']) && isset($_POST['prov_http_port'])) {
+    $posted_port = trim((string)$_POST['prov_http_port']);
+    if (!yealink_epm_valid_port($posted_port)) {
+        $epm_prov_port_notice = "Port '" . htmlspecialchars($posted_port) . "' is not valid (use 1-65535, not 80 or 443); kept port " . yealink_epm_prov_port() . ".";
+    } elseif ((int)$posted_port !== yealink_epm_prov_port()) {
+        if (yealink_epm_save_prov_port($posted_port)) {
+            yealink_epm_prov_port($posted_port);
+        } else {
+            $epm_prov_port_notice = "Could not save the port (is " . yealink_epm_settings_path() . " writable?); kept port " . yealink_epm_prov_port() . ".";
+        }
+    }
+}
+
+// TCP ports something is currently listening on (any address), from /proc/net/tcp{,6}.
+function epm_listening_tcp_ports() {
+    $ports = [];
+    foreach (['/proc/net/tcp', '/proc/net/tcp6'] as $f) {
+        $rows = @file($f, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if (!$rows) { continue; }
+        foreach (array_slice($rows, 1) as $r) {
+            $c = preg_split('/\s+/', trim($r));
+            if (isset($c[1], $c[3]) && $c[3] === '0A' && preg_match('/:([0-9A-Fa-f]{4})$/', $c[1], $m)) {
+                $ports[hexdec($m[1])] = true;
+            }
+        }
+    }
+    $out = array_keys($ports);
+    sort($out);
+    return $out;
+}
+
+// One raw HTTP GET (no redirects followed). ['connected'=>bool, 'code'=>int|null, 'location'=>string]
+function yealink_epm_http_probe($connect_host, $port, $host_header, $path) {
+    $res = ['connected' => false, 'code' => null, 'location' => ''];
+    $fp = @fsockopen($connect_host, (int)$port, $errno, $errstr, 1.0);
+    if (!$fp) {
+        return $res;
+    }
+    $res['connected'] = true;
+    stream_set_timeout($fp, 2);
+    @fwrite($fp, "GET {$path} HTTP/1.0\r\nHost: {$host_header}\r\nUser-Agent: yealink-epm-probe\r\nConnection: close\r\n\r\n");
+    $head = '';
+    while (!feof($fp) && strlen($head) < 8192) {
+        $line = fgets($fp, 2048);
+        if ($line === false) { break; }
+        $head .= $line;
+        if (trim($line) === '') { break; }
+    }
+    @fclose($fp);
+    if (preg_match('#^HTTP/\d\.\d\s+(\d{3})#', $head, $m)) {
+        $res['code'] = (int)$m[1];
+    }
+    if (preg_match('#^Location:\s*(\S+)#im', $head, $lm)) {
+        $res['location'] = $lm[1];
+    }
+    return $res;
+}
+
+// Does a plain-HTTP request for $path on port 80 get answered with a redirect to https://?
+// true / false, or null when port 80 could not be reached or did not answer HTTP (inconclusive).
+function yealink_epm_http_path_redirects($connect_host, $host_header, $path) {
+    $r = yealink_epm_http_probe($connect_host, 80, $host_header, $path);
+    if (!$r['connected'] || $r['code'] === null) {
+        return null;
+    }
+    return in_array($r['code'], [301, 302, 303, 307, 308], true)
+        && stripos($r['location'], 'https://') === 0;
+}
+
+// True when http://<server>/PhoneSettings/ or /tftpboot/ is being forwarded to https.
+// Falls back to "is anything listening on the HTTP provisioning port" only when port 80
+// can't be probed.
+function yealink_epm_detect_https_redirect($lan_host) {
+    $any_answer = false;
+    foreach (array_unique([$lan_host, '127.0.0.1']) as $connect_host) {
+        foreach (['/PhoneSettings/', '/tftpboot/'] as $path) {
+            $r = yealink_epm_http_path_redirects($connect_host, $lan_host, $path);
+            if ($r === true) { return true; }
+            if ($r === false) { $any_answer = true; }
+        }
+        if ($any_answer) { return false; }   // port 80 answered and did not redirect
+    }
+    $fp = @fsockopen('127.0.0.1', yealink_epm_prov_port(), $errno, $errstr, 0.5);
+    if ($fp) {
+        @fclose($fp);
+        return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Root helper. Apache's listener can only be changed by root, so a ONE-TIME setup-root.sh
+// (run once over SSH, like ovpn_mgr's) installs a root-owned helper plus a narrow sudoers
+// rule. After that, picking a new port in Global Settings is applied from the page itself.
+// ---------------------------------------------------------------------------
+if (!defined('EPM_CTL_VERSION')) { define('EPM_CTL_VERSION', '2'); }
+function epm_ctl_path() { return '/usr/local/sbin/yealink_epm_ctl'; }
+
+// Runs the helper through sudo -n (fails fast instead of waiting for a password).
+function epm_ctl_run(array $args) {
+    $bin = epm_ctl_path();
+    if (!is_executable($bin)) { return ['ok' => false, 'out' => '', 'missing' => true]; }
+    if (!function_exists('exec')) { return ['ok' => false, 'out' => 'exec() is disabled in PHP.', 'missing' => false]; }
+    $cmd = 'timeout 60 sudo -n ' . escapeshellarg($bin) . ' ' . implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1';
+    $lines = [];
+    $code = 1;
+    @exec($cmd, $lines, $code);
+    return ['ok' => ($code === 0), 'out' => trim(implode("\n", $lines)), 'missing' => false];
+}
+
+// 'ready' | 'missing' (setup-root.sh never run) | 'nosudo' (helper present, sudo rule missing)
+// | 'outdated' (helper older than this module - re-run setup-root.sh). Cached per request.
+function epm_ctl_info($set = null) {
+    static $i = ['user' => '', 'out' => ''];
+    if ($set !== null) { $i = $set; }
+    return $i;
+}
+function epm_ctl_status() {
+    static $st = null;
+    if ($st !== null) { return $st; }
+    $r = epm_ctl_run(['version']);
+    $who = '';
+    if (function_exists('posix_geteuid') && function_exists('posix_getpwuid')) {
+        $pw = @posix_getpwuid(posix_geteuid());
+        $who = is_array($pw) ? (string)$pw['name'] : '';
+    }
+    epm_ctl_info(['user' => $who, 'out' => (string)$r['out']]);
+    if (!empty($r['missing']))                  { return $st = 'missing'; }
+    if (!$r['ok'])                              { return $st = 'nosudo'; }
+    if (trim($r['out']) !== EPM_CTL_VERSION)    { return $st = 'outdated'; }
+    return $st = 'ready';
+}
+
+// Asks the helper to make Apache serve /PhoneSettings and /tftpboot on $port.
+function epm_apply_prov_port($port) {
+    if (!yealink_epm_valid_port($port)) { return ['ok' => false, 'message' => 'Invalid port.']; }
+    if (epm_ctl_status() !== 'ready')   { return ['ok' => false, 'message' => 'The one-time root setup has not been run (or is out of date).']; }
+    $r = epm_ctl_run(['setport', (string)(int)$port]);
+    if (!$r['ok']) {
+        $msg = $r['out'] !== '' ? $r['out'] : 'The helper returned an error.';
+        return ['ok' => false, 'message' => mb_substr($msg, 0, 600)];
+    }
+    $warn = [];
+    foreach (preg_split('/\r?\n/', $r['out']) as $l) {
+        if (stripos($l, 'WARNING') !== false) { $warn[] = trim(preg_replace('/^\[[^\]]*\]\s*WARNING:\s*/', '', $l)); }
+    }
+    return ['ok' => true, 'message' => "Apache now serves /PhoneSettings and /tftpboot on port " . (int)$port . '.'
+        . ($warn ? ' Note: ' . implode(' ', $warn) : '')];
+}
+
+// Port of the listener this module's root helper created, read from its (world-readable) config.
+function epm_own_listener_port() {
+    foreach (['/etc/apache2/sites-available/yealink_epm_prov.conf', '/etc/httpd/conf.d/yealink_epm_prov.conf'] as $f) {
+        $c = @file_get_contents($f);
+        if ($c !== false && preg_match('/^Listen\s+(\d{1,5})\s*$/m', $c, $m)) {
+            return (int)$m[1];
+        }
+    }
+    return null;
+}
+
+// Can phones use $port for http provisioning? state: 'serving' (our /PhoneSettings answers
+// there over plain HTTP), 'free' (nothing listening yet), 'in_use' (another service owns it),
+// 'redirected' (this module's own listener, but a rule still redirects it to https) or 'invalid'. $redirect = whether an http->https redirect is currently detected.
+function yealink_epm_check_prov_port($port, $lan_host, $redirect = false) {
+    if (!yealink_epm_valid_port($port)) {
+        return ['state' => 'invalid', 'message' => 'Port must be a number from 1 to 65535 (not 80 or 443).'];
+    }
+    $port = (int)$port;
+    $listening = in_array($port, epm_listening_tcp_ports(), true);
+    $probe = null;
+    foreach (array_unique([$lan_host, '127.0.0.1']) as $h) {
+        $r = yealink_epm_http_probe($h, $port, $lan_host, '/PhoneSettings/');
+        if ($r['connected']) { $probe = $r; break; }
+    }
+    if ($probe === null) {
+        if ($listening) {
+            return ['state' => 'in_use', 'message' => "Port {$port} is already in use by another service on this server. Pick a different port."];
+        }
+        $msg = "Nothing is listening on port {$port} yet.";
+        if ($redirect) {
+            $msg .= (epm_ctl_status() === 'ready')
+                ? ' Saving (or the button in the banner) sets it up in Apache automatically.'
+                : ' Run the one-time setup command shown at the top of this page; after that, port changes are applied from here.';
+        }
+        return ['state' => 'free', 'message' => $msg];
+    }
+    if (in_array($probe['code'], [200, 403], true)) {
+        return ['state' => 'serving', 'message' => "Port {$port} is serving /PhoneSettings over plain HTTP."];
+    }
+    $is_redirect = in_array($probe['code'], [301, 302, 303, 307, 308], true);
+    $loc = $probe['location'] !== '' ? " to {$probe['location']}" : '';
+    if ($is_redirect && epm_own_listener_port() === $port) {
+        return ['state' => 'redirected', 'message' => "Apache is listening on port {$port} for this module, but requests are still being redirected{$loc}. Another redirect rule is catching this port too."];
+    }
+    $what = $probe['code'] === null ? 'it did not answer HTTP' : "it answered HTTP {$probe['code']}{$loc} for /PhoneSettings/";
+    return ['state' => 'in_use', 'message' => "Port {$port} is already in use by another service ({$what}). Pick a different port."];
 }
 
 // Re-derives host:port for the provisioning/asset target from the CURRENT
 // sysadmin_redirect state, rather than trusting a port baked into a
 // previously-saved value. Only the hostname is preserved from $host_string;
 // the port is always recomputed so toggling the global HTTPS redirect
-// setting takes effect immediately, without stale :83 (or missing :83)
+// setting takes effect immediately, without a stale (or missing) port
 // values persisting from before the setting was changed.
 function yealink_epm_apply_redirect_port($host_string, $sysadmin_redirect) {
     if (empty($host_string)) {
@@ -225,7 +465,7 @@ function yealink_epm_apply_redirect_port($host_string, $sysadmin_redirect) {
         }
     }
     $bare = explode(':', $bare)[0];
-    return $sysadmin_redirect ? "{$bare}:83" : $bare;
+    return $sysadmin_redirect ? "{$bare}:" . yealink_epm_prov_port() : $bare;
 }
 
 // URL of an empty tarball the phone is pointed at when its VPN is turned off. The running
@@ -284,11 +524,74 @@ $get_lan_ip = function() use ($raw_host) {
 };
 
 $detected_host = $get_lan_ip();
+$sysadmin_redirect = yealink_epm_detect_https_redirect($detected_host);
+$epm_prov_port_state = $sysadmin_redirect ? yealink_epm_check_prov_port(yealink_epm_prov_port(), $detected_host, true) : null;
+
+// Saving Global Settings while a redirect is active and the chosen port isn't served yet:
+// set it up through the root helper (no SSH needed once setup-root.sh has been run).
+if ($sysadmin_redirect && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset($_POST['save_global'])
+    && is_array($epm_prov_port_state) && $epm_prov_port_state['state'] !== 'serving') {
+    if (in_array($epm_prov_port_state['state'], ['free', 'redirected'], true) && epm_ctl_status() === 'ready') {
+        $ap = epm_apply_prov_port(yealink_epm_prov_port());
+        $epm_prov_port_notice .= ($epm_prov_port_notice !== '' ? ' ' : '') . htmlspecialchars($ap['message']);
+        $epm_prov_port_state = yealink_epm_check_prov_port(yealink_epm_prov_port(), $detected_host, true);
+        if ($epm_prov_port_state['state'] === 'redirected') {
+            $epm_prov_port_notice .= ' ' . htmlspecialchars($epm_prov_port_state['message']);
+        }
+    } elseif ($epm_prov_port_state['state'] === 'in_use') {
+        $epm_prov_port_notice .= ($epm_prov_port_notice !== '' ? ' ' : '') . htmlspecialchars($epm_prov_port_state['message']);
+    }
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'check_prov_port') {
+    if (ob_get_length()) { ob_clean(); }
+    header('Content-Type: application/json');
+    $chk = yealink_epm_check_prov_port($_GET['port'] ?? '', $detected_host, (bool)$sysadmin_redirect);
+    $chk['port'] = (string)($_GET['port'] ?? '');
+    echo json_encode($chk);
+    exit;
+}
+
+// "Find the redirect rule" button in the banner (read-only).
+if (isset($_GET['action']) && $_GET['action'] === 'diagnose_redirect') {
+    if (ob_get_length()) { ob_clean(); }
+    header('Content-Type: application/json');
+    if (epm_ctl_status() !== 'ready') {
+        echo json_encode(['ok' => false, 'out' => 'The one-time root setup has not been run (or is out of date).']);
+        exit;
+    }
+    $dg = epm_ctl_run(['diagnose']);
+    echo json_encode(['ok' => $dg['ok'], 'out' => $dg['out']]);
+    exit;
+}
+
+// "Set up port now" button in the banner.
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset($_GET['action']) && $_GET['action'] === 'apply_prov_port') {
+    if (ob_get_length()) { ob_clean(); }
+    header('Content-Type: application/json');
+    $want = $_POST['port'] ?? '';
+    if (!yealink_epm_valid_port($want)) {
+        echo json_encode(['ok' => false, 'message' => 'Invalid port.']);
+        exit;
+    }
+    $chk = yealink_epm_check_prov_port($want, $detected_host, true);
+    if ($chk['state'] === 'in_use') {
+        echo json_encode(['ok' => false, 'message' => $chk['message']]);
+        exit;
+    }
+    if ($chk['state'] === 'serving') {
+        echo json_encode(['ok' => true, 'message' => $chk['message']]);
+        exit;
+    }
+    echo json_encode(epm_apply_prov_port($want));
+    exit;
+}
 
 if ($sysadmin_redirect) {
-    $default_provision_url = "http://{$detected_host}:83/PhoneSettings/";
-    $default_server_target = "{$detected_host}:83";
-    $ringtone_http_base = "http://{$detected_host}:83/PhoneSettings/ringtones/";
+    $epm_prov_port_now = yealink_epm_prov_port();
+    $default_provision_url = "http://{$detected_host}:{$epm_prov_port_now}/PhoneSettings/";
+    $default_server_target = "{$detected_host}:{$epm_prov_port_now}";
+    $ringtone_http_base = "http://{$detected_host}:{$epm_prov_port_now}/PhoneSettings/ringtones/";
 } else {
     $default_provision_url = "http://{$detected_host}/PhoneSettings/";
     $default_server_target = $detected_host;
@@ -1138,7 +1441,7 @@ if (file_exists($global_cfg_file)) {
                 // this value elsewhere, and SIP registration already has its
                 // own port field (account.1.sip_server_port) — it must never
                 // carry the HTTP provisioning port. Keep this bare (host
-                // only); the :83 shift is applied separately, only where an
+                // only); the port shift is applied separately, only where an
                 // http:// URL is actually being built (provisioning, ringtone,
                 // logo, VPN key downloads).
                 $saved_global_server_ip = yealink_epm_apply_redirect_port(trim($gm[1]), false);
@@ -1812,7 +2115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_device_overrides
                 if (preg_match('#^ringtone\.url\s*=\s*(\S+)/ringtones/#mi', $ov_base_text, $um)) {
                     $ov_assets = $um[1];
                 } else {
-                    $ov_assets = "http://{$saved_global_server_ip}" . ((isset($sysadmin_redirect) && $sysadmin_redirect) ? ':83' : '') . '/PhoneSettings';
+                    $ov_assets = "http://{$saved_global_server_ip}" . ((isset($sysadmin_redirect) && $sysadmin_redirect) ? ':' . yealink_epm_prov_port() : '') . '/PhoneSettings';
                 }
                 $ov_lines .= "ringtone.url = {$ov_assets}/ringtones/{$rv}\n";
             }
@@ -2016,6 +2319,87 @@ ksort($all_extensions);
 // ============================================================================
 // 7. AJAX ENDPOINTS (INCLUDES OVPN TOGGLE, AUDIO TRIMMING & SCANNING)
 // ============================================================================
+
+if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'rename_device_mac') {
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+    header('Content-Type: application/json; charset=utf-8');
+
+    // Changes only the MAC the phone is provisioned under. The cfg's content (template, extension,
+    // keys, overrides, VPN settings) is carried over untouched except for the VPN tar filename.
+    $old_mac = strtolower(preg_replace('/[^a-fA-F0-9]/', '', $_REQUEST['old'] ?? ''));
+    $new_mac = strtolower(preg_replace('/[^a-fA-F0-9]/', '', $_REQUEST['new'] ?? ''));
+
+    if (strlen($old_mac) !== 12 || strlen($new_mac) !== 12) {
+        echo json_encode(['status' => 'error', 'message' => 'A MAC address must be exactly 12 hexadecimal characters.']);
+        exit;
+    }
+    if ($old_mac === $new_mac) {
+        echo json_encode(['status' => 'success', 'unchanged' => true]);
+        exit;
+    }
+
+    $old_cfg = $tftp_dir . $old_mac . '.cfg';
+    $new_cfg = $tftp_dir . $new_mac . '.cfg';
+    if (!file_exists($old_cfg)) {
+        echo json_encode(['status' => 'error', 'message' => "Configuration file {$old_mac}.cfg was not found."]);
+        exit;
+    }
+    if (file_exists($new_cfg)) {
+        echo json_encode(['status' => 'error', 'message' => "A configuration file for {$new_mac} already exists. Delete it first or choose a different MAC."]);
+        exit;
+    }
+
+    // VPN tars are named <mac>_<ext>_ovpn.tar. Rename them first so the cfg never points at a missing file.
+    $renamed_tars = [];
+    $tar_failed = false;
+    foreach (glob($vpnkeys_dir . $old_mac . '_*_ovpn.tar') ?: [] as $old_tar) {
+        $new_tar = $vpnkeys_dir . $new_mac . substr(basename($old_tar), 12);
+        if (file_exists($new_tar) || !@rename($old_tar, $new_tar)) {
+            $tar_failed = true;
+            break;
+        }
+        @chown($new_tar, 'asterisk');
+        $renamed_tars[$old_tar] = $new_tar;
+    }
+    if ($tar_failed) {
+        foreach ($renamed_tars as $o => $n) { @rename($n, $o); }
+        echo json_encode(['status' => 'error', 'message' => 'Could not rename the VPN key package. Nothing was changed.']);
+        exit;
+    }
+
+    // Point openvpn.url at the renamed tar (only lines that reference this MAC's package).
+    $cfg_content = (string)@file_get_contents($old_cfg);
+    if (!empty($renamed_tars)) {
+        $cfg_content = preg_replace(
+            '#^(\s*openvpn\.url\s*=.*/vpnkeys/)' . preg_quote($old_mac, '#') . '(_[^/\s]*_ovpn\.tar.*)$#mi',
+            '${1}' . $new_mac . '${2}',
+            $cfg_content
+        );
+    }
+
+    if (@file_put_contents($new_cfg, $cfg_content) === false) {
+        foreach ($renamed_tars as $o => $n) { @rename($n, $o); }
+        echo json_encode(['status' => 'error', 'message' => "Could not write {$new_mac}.cfg in {$tftp_dir}."]);
+        exit;
+    }
+    @chown($new_cfg, 'asterisk');
+    @unlink($old_cfg);
+
+    // Keep the registered-device record (used for the non-Yealink-OUI allow list) in step.
+    if (isset($pdo) && $pdo instanceof PDO) {
+        try {
+            $upd = $pdo->prepare("UPDATE yealink_epm_devices SET mac = ? WHERE LOWER(mac) = ?");
+            $upd->execute([$new_mac, $old_mac]);
+        } catch (Exception $e) {
+            error_log('Yealink EPM: unable to update registered MAC: ' . $e->getMessage());
+        }
+    }
+
+    echo json_encode(['status' => 'success', 'old' => $old_mac, 'new' => $new_mac, 'vpn_renamed' => count($renamed_tars)]);
+    exit;
+}
 
 if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
     while (ob_get_level()) {
@@ -2829,6 +3213,7 @@ $formData = [
     'exp_model' => 'none',
     'exp_count' => '0',
     'server_ip' => $saved_global_server_ip,
+    'prov_http_port' => yealink_epm_prov_port(),
     'sip_port' => $default_sip_port,
     'sip_listen_port' => '5062',
     'voicemail_number' => $default_voicemail_ext,
@@ -2864,7 +3249,8 @@ $formData = [
     'auto_provision_dhcp_option_enable' => '1',
     'auto_provision_username' => '',
     'auto_provision_password' => '',
-    'active_tab' => $_POST['active_tab'] ?? 'tab_global'
+    'active_tab' => $_POST['active_tab']
+        ?? ((isset($_GET['tab']) && in_array($_GET['tab'], ['tab_global', 'tab_template', 'tab_devices'], true)) ? $_GET['tab'] : 'tab_global')
 ];
 
 $formData["linekey_1_type"] = "15";
@@ -3004,10 +3390,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     // $saved_global_server_ip is always the bare host (no port). SIP
     // registration uses its own port field (account.1.sip_server_port,
     // account.1.port below) and must never carry the HTTP provisioning
-    // port — only HTTP asset URLs (logo/ringtone) shift to :83.
+    // port — only HTTP asset URLs (logo/ringtone) shift to the provisioning port.
     $host_only = $saved_global_server_ip;
     $asset_host = $sysadmin_redirect
-        ? "http://{$host_only}:83/PhoneSettings"
+        ? "http://{$host_only}:" . yealink_epm_prov_port() . "/PhoneSettings"
         : "http://{$host_only}/PhoneSettings";
 
     $logo_path_prefix = "{$asset_host}/logo/";
@@ -3406,19 +3792,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
         if (count($filtered_exts) !== count(array_unique($filtered_exts))) {
             $status = "<span style='color:#dc3545;'><b>Error:</b> Duplicate extensions detected in submission! Each phone must have a unique extension assigned.</span>";
             goto skip_device_rebuild;
-        }
-    }
-
-    foreach ($edited_macs as $orig_mac => $new_mac) {
-        $clean_orig = strtolower(trim($orig_mac));
-        $clean_new = strtolower(preg_replace('/[^a-fA-F0-9]/', '', $new_mac));
-        if (!empty($clean_new) && strlen($clean_new) === 12 && $clean_orig !== $clean_new) {
-            $orig_path = $tftp_dir . $clean_orig . ".cfg";
-            $new_path = $tftp_dir . $clean_new . ".cfg";
-            if (file_exists($orig_path) && !file_exists($new_path)) {
-                @rename($orig_path, $new_path);
-                @chown($new_path, 'asterisk');
-            }
         }
     }
 
@@ -3853,8 +4226,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['save_global'])) {
         if (isset($_POST[$k])) $formData[$k] = trim($_POST[$k]);
     }
 
+    $formData['prov_http_port'] = yealink_epm_prov_port();   // the validated/effective port, not raw POST text
     $generated_common_cfg = generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_target, $tftp_dir, $sysadmin_redirect);
-    $status = "Saved Global Settings to " . count(yealinkGlobalCfgMap()) . " y-config file(s) in {$tftp_dir}";
+    $status = "Saved Global Settings to " . count(yealinkGlobalCfgMap()) . " y-config file(s) in {$tftp_dir}"
+        . ($epm_prov_port_notice !== '' ? ' ' . $epm_prov_port_notice : '');
 }
 
 $max_dialnow_slots = (int)($formData['dialnow_count'] ?? 1);

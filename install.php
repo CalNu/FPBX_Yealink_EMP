@@ -305,7 +305,7 @@ if (!empty($missing_deps) && function_exists('out')) {
 // accidentally port-forwarded. Adjust the ranges below if your LAN uses a
 // different scheme (e.g. add more specific subnets, or remove ranges you don't use).
 $htaccess_content = <<<EOT
-Options +Indexes
+Options +Indexes +FollowSymLinks
 DirectoryIndex disabled
 
 <IfModule mod_authz_core.c>
@@ -340,6 +340,10 @@ if ($phone_settings_ok) {
 }
 
 foreach ($target_htaccess_files as $htaccess_path) {
+    // Folder password protection (Global Settings) is already on: leave that file alone.
+    if (is_file($htaccess_path) && strpos((string)@file_get_contents($htaccess_path), 'AuthUserFile') !== false) {
+        continue;
+    }
     if (!file_exists($htaccess_path) || file_get_contents($htaccess_path) !== $htaccess_content) {
         @file_put_contents($htaccess_path, $htaccess_content);
         @chown($htaccess_path, 'asterisk');

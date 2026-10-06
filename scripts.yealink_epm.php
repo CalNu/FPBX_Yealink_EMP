@@ -80,6 +80,12 @@ if (file_exists($module_xml_path)) {
 $generated_common_cfg = "";
 $generated_template_cfg = "";
 $status = "";
+// One-shot message left by a Device Manager action just before its redirect
+// (Post/Redirect/Get), so reloading the page never re-submits the form.
+if (!empty($_SESSION['epm_flash_status'])) {
+    $status = $_SESSION['epm_flash_status'];
+    unset($_SESSION['epm_flash_status']);
+}
 $tftp_dir = "/tftpboot/";
 $template_dir = "/tftpboot/templates/";
 $logo_dir = "/var/www/html/PhoneSettings/logo/";
@@ -87,6 +93,32 @@ $ringtone_dir = "/var/www/html/PhoneSettings/ringtones/";
 $vpnkeys_dir = "/var/www/html/PhoneSettings/vpnkeys/";
 $ringtone_was_deleted = false;
 $just_flushed = false;
+if (!empty($_SESSION['epm_flash_flags']) && is_array($_SESSION['epm_flash_flags'])) {
+    $ringtone_was_deleted = !empty($_SESSION['epm_flash_flags']['ringtone_was_deleted']);
+    $just_flushed         = !empty($_SESSION['epm_flash_flags']['just_flushed']);
+    unset($_SESSION['epm_flash_flags']);
+}
+
+// Post/Redirect/Get helper: remember the status text (and the two one-shot render
+// flags), then send the browser to a plain GET so reloading the page doesn't ask
+// to resend form data. Never returns.
+if (!function_exists('epm_redirect_after_post')) {
+    function epm_redirect_after_post($tab, $status_html, $tpl = '') {
+        global $ringtone_was_deleted, $just_flushed;
+        if (!in_array($tab, ['tab_global', 'tab_template', 'tab_devices'], true)) { $tab = 'tab_global'; }
+        $_SESSION['epm_flash_status'] = $status_html;
+        $_SESSION['epm_flash_flags']  = ['ringtone_was_deleted' => !empty($ringtone_was_deleted), 'just_flushed' => !empty($just_flushed)];
+        $url = 'config.php?display=yealink_epm&tab=' . $tab;
+        if ($tpl !== '') { $url .= '&tpl=' . rawurlencode(basename($tpl)); }
+        if (!headers_sent()) {
+            header('Location: ' . $url);
+        } else {
+            echo '<script>window.location.replace(' . json_encode($url) . ');</script>'
+               . '<noscript><meta http-equiv="refresh" content="0;url=' . htmlspecialchars($url) . '"></noscript>';
+        }
+        exit;
+    }
+}
 
 foreach ([$logo_dir, $ringtone_dir, $template_dir, $vpnkeys_dir] as $dir) {
     if (!file_exists($dir)) {
@@ -206,7 +238,7 @@ $sysadmin_redirect = false;   // decided below, once $detected_host is known
 // HTTP provisioning port. When http://<server>/PhoneSettings (or /tftpboot) is being
 // forwarded to https, phones can't download from port 80, so every http:// URL the module
 // writes (provisioning, vpn.tar, ringtones, logo/wallpaper) is shifted to this port. It is
-// user-selectable (Global Settings, next to PBX Server IP) and defaults to 83. It only
+// user-selectable (Global Settings, next to PBX Server IP) and defaults to 83 (also where FreePBX Port Management's HTTP Provisioning listens, which is fine - see yealink_epm_check_prov_port). It only
 // takes effect while a redirect is detected - the detection runs on every page load.
 // Stored in a small dotfile so it is known before the global .cfg is parsed.
 // ---------------------------------------------------------------------------
@@ -281,7 +313,7 @@ function epm_listening_tcp_ports() {
 
 // One raw HTTP GET (no redirects followed). ['connected'=>bool, 'code'=>int|null, 'location'=>string]
 function yealink_epm_http_probe($connect_host, $port, $host_header, $path) {
-    $res = ['connected' => false, 'code' => null, 'location' => ''];
+    $res = ['connected' => false, 'code' => null, 'location' => '', 'auth' => ''];
     $fp = @fsockopen($connect_host, (int)$port, $errno, $errstr, 1.0);
     if (!$fp) {
         return $res;
@@ -302,6 +334,9 @@ function yealink_epm_http_probe($connect_host, $port, $host_header, $path) {
     }
     if (preg_match('#^Location:\s*(\S+)#im', $head, $lm)) {
         $res['location'] = $lm[1];
+    }
+    if (preg_match('#^WWW-Authenticate:\s*(.+?)\s*$#im', $head, $am)) {
+        $res['auth'] = $am[1];
     }
     return $res;
 }
@@ -343,7 +378,14 @@ function yealink_epm_detect_https_redirect($lan_host) {
 // (run once over SSH, like ovpn_mgr's) installs a root-owned helper plus a narrow sudoers
 // rule. After that, picking a new port in Global Settings is applied from the page itself.
 // ---------------------------------------------------------------------------
-if (!defined('EPM_CTL_VERSION')) { define('EPM_CTL_VERSION', '2'); }
+if (!defined('EPM_CTL_VERSION')) { define('EPM_CTL_VERSION', '5'); }          // the helper version this module ships
+// The oldest helper that still does what the page needs for a port change. The setup banner only
+// appears below this; bump it only when a module change cannot work without a newer helper.
+// (browse needs 5, but that is checked where it is used, so a port change never nags for it.)
+if (!defined('EPM_CTL_MIN_VERSION')) { define('EPM_CTL_MIN_VERSION', 3); }
+if (!function_exists('epm_ctl_installed')) {
+    function epm_ctl_installed($set = null) { static $v = 0; if ($set !== null) { $v = (int)$set; } return $v; }
+}
 function epm_ctl_path() { return '/usr/local/sbin/yealink_epm_ctl'; }
 
 // Runs the helper through sudo -n (fails fast instead of waiting for a password).
@@ -377,8 +419,24 @@ function epm_ctl_status() {
     epm_ctl_info(['user' => $who, 'out' => (string)$r['out']]);
     if (!empty($r['missing']))                  { return $st = 'missing'; }
     if (!$r['ok'])                              { return $st = 'nosudo'; }
-    if (trim($r['out']) !== EPM_CTL_VERSION)    { return $st = 'outdated'; }
+    epm_ctl_installed((int)trim($r['out']));
+    if (epm_ctl_installed() < EPM_CTL_MIN_VERSION) { return $st = 'outdated'; }
     return $st = 'ready';
+}
+
+// What a phone really requests: the provisioning URL has no folder, so it asks for /<file>.cfg at the
+// site root. Use the global cfg when it exists, otherwise the empty key archive under /PhoneSettings.
+function epm_phone_probe_path() {
+    return is_file('/tftpboot/y000000000000.cfg') ? '/y000000000000.cfg' : '/PhoneSettings/fakekeys/null.tar';
+}
+
+// Makes Apache honour the folders' .htaccess files on a listener that already serves /tftpboot as its
+// document root (FreePBX Port Management's HTTP Provisioning). Idempotent.
+function epm_apply_browse() {
+    if (epm_ctl_status() !== 'ready') { return ['ok' => false, 'message' => 'The one-time root setup has not been run (or is out of date).']; }
+    if (epm_ctl_installed() < 5) { return ['ok' => false, 'message' => 'To apply the folder rules on this port, re-run scripts/setup-root.sh once (needs helper version 5).']; }
+    $r = epm_ctl_run(['browse']);
+    return ['ok' => $r['ok'], 'message' => $r['ok'] ? 'This port now applies the .htaccess rules in the provisioning folders (LAN-only, folder login, hidden folders).' : mb_substr(($r['out'] !== '' ? $r['out'] : 'The helper returned an error.'), 0, 600)];
 }
 
 // Asks the helper to make Apache serve /PhoneSettings and /tftpboot on $port.
@@ -419,9 +477,10 @@ function yealink_epm_check_prov_port($port, $lan_host, $redirect = false) {
     $port = (int)$port;
     $listening = in_array($port, epm_listening_tcp_ports(), true);
     $probe = null;
+    $probe_host = $lan_host;
     foreach (array_unique([$lan_host, '127.0.0.1']) as $h) {
         $r = yealink_epm_http_probe($h, $port, $lan_host, '/PhoneSettings/');
-        if ($r['connected']) { $probe = $r; break; }
+        if ($r['connected']) { $probe = $r; $probe_host = $h; break; }
     }
     if ($probe === null) {
         if ($listening) {
@@ -436,14 +495,34 @@ function yealink_epm_check_prov_port($port, $lan_host, $redirect = false) {
         return ['state' => 'free', 'message' => $msg];
     }
     if (in_array($probe['code'], [200, 403], true)) {
+        // /PhoneSettings/ answering is not enough on its own: phones request /<file>.cfg at the site
+        // root (the provisioning URL has no folder), so fetch that. FreePBX Port Management's own
+        // HTTP Provisioning listener (DocumentRoot /tftpboot) answers it; a listener that cannot is
+        // some other service. This module's own listener failing the same test is not "another
+        // service": it is an older layout, reported as 'free' so saving rebuilds it.
+        $t = yealink_epm_http_probe($probe_host, $port, $lan_host, epm_phone_probe_path());
+        if ($t['connected'] && !in_array($t['code'], [200, 401], true)) {
+            $got = ($t['code'] === null ? 'nothing' : "HTTP {$t['code']}");
+            if (epm_own_listener_port() === $port) {
+                return ['state' => 'free', 'message' => "This module's listener on port {$port} does not serve phone configs yet ('" . epm_phone_probe_path() . "' answers {$got}). Saving rebuilds it."];
+            }
+            return ['state' => 'in_use', 'message' => "Port {$port} is already in use by another service: /PhoneSettings/ answers HTTP {$probe['code']} but '" . epm_phone_probe_path() . "' answers {$got}, so phones could not download from it. Pick a different port."];
+        }
         return ['state' => 'serving', 'message' => "Port {$port} is serving /PhoneSettings over plain HTTP."];
+    }
+    // 401 = the folder login (Server Username/Password) is active. It is ours if the challenge
+    // carries this module's realm, or if this module's own listener owns the port.
+    if ($probe['code'] === 401
+        && (stripos($probe['auth'], 'Yealink Provisioning') !== false || epm_own_listener_port() === $port)) {
+        return ['state' => 'serving', 'message' => "Port {$port} is serving /PhoneSettings over plain HTTP (password-protected)."];
     }
     $is_redirect = in_array($probe['code'], [301, 302, 303, 307, 308], true);
     $loc = $probe['location'] !== '' ? " to {$probe['location']}" : '';
     if ($is_redirect && epm_own_listener_port() === $port) {
         return ['state' => 'redirected', 'message' => "Apache is listening on port {$port} for this module, but requests are still being redirected{$loc}. Another redirect rule is catching this port too."];
     }
-    $what = $probe['code'] === null ? 'it did not answer HTTP' : "it answered HTTP {$probe['code']}{$loc} for /PhoneSettings/";
+    $realm = $probe['auth'] !== '' ? " [{$probe['auth']}]" : '';
+    $what = $probe['code'] === null ? 'it did not answer HTTP' : "it answered HTTP {$probe['code']}{$loc}{$realm} for /PhoneSettings/";
     return ['state' => 'in_use', 'message' => "Port {$port} is already in use by another service ({$what}). Pick a different port."];
 }
 
@@ -500,6 +579,51 @@ function epm_tftp_status() {
     return 'missing';
 }
 
+// Cockpit (web admin console) detection for the optional "Cockpit" tab. Returns
+// ['installed' => bool, 'port' => int, 'listening' => bool]. The port comes from cockpit.socket
+// (ListenStream), honouring drop-ins in /etc/systemd/system/cockpit.socket.d/; default is 9090.
+function epm_cockpit_info() {
+    $installed = false;
+    foreach (['/usr/lib/systemd/system/cockpit.socket', '/lib/systemd/system/cockpit.socket',
+              '/etc/systemd/system/cockpit.socket', '/usr/libexec/cockpit-ws', '/usr/lib/cockpit/cockpit-ws',
+              '/usr/sbin/cockpit-ws', '/usr/share/cockpit'] as $p) {
+        if (@file_exists($p)) { $installed = true; break; }
+    }
+    $port = 9090;
+    if ($installed) {
+        $files = [];
+        foreach (['/usr/lib/systemd/system/cockpit.socket', '/lib/systemd/system/cockpit.socket'] as $f) {
+            if (@is_readable($f)) { $files[] = $f; break; }
+        }
+        if (@is_readable('/etc/systemd/system/cockpit.socket')) { $files[] = '/etc/systemd/system/cockpit.socket'; }
+        $drop = @glob('/etc/systemd/system/cockpit.socket.d/*.conf') ?: [];
+        sort($drop);
+        $files = array_merge($files, $drop);
+        foreach ($files as $f) {
+            foreach ((array)@file($f, FILE_IGNORE_NEW_LINES) as $line) {
+                if (!preg_match('/^\s*ListenStream\s*=\s*(.*?)\s*$/i', $line, $m)) { continue; }
+                if ($m[1] === '') { continue; } // empty value resets the list; the next entry sets the port
+                if (preg_match('/^(?:.*:)?(\d{1,5})$/', $m[1], $pm) && (int)$pm[1] > 0 && (int)$pm[1] < 65536) {
+                    $port = (int)$pm[1];
+                }
+            }
+        }
+    }
+    $listening = false;
+    if ($installed) {
+        $hex = strtoupper(sprintf('%04x', $port));
+        foreach (['/proc/net/tcp', '/proc/net/tcp6'] as $f) {
+            foreach ((array)@file($f, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $i => $r) {
+                if ($i === 0) { continue; }
+                $c = preg_split('/\s+/', trim($r));
+                if (isset($c[1], $c[3]) && $c[3] === '0A' && preg_match('/:' . $hex . '$/i', $c[1])) { $listening = true; break 2; }
+            }
+        }
+    }
+    return ['installed' => $installed, 'port' => $port, 'listening' => $listening];
+}
+$epm_cockpit = epm_cockpit_info();
+
 $raw_host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_ADDR'] ?? '';
 if (strpos($raw_host, ':') !== false) {
     $raw_host = explode(':', $raw_host)[0];
@@ -541,6 +665,16 @@ if ($sysadmin_redirect && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset
     } elseif ($epm_prov_port_state['state'] === 'in_use') {
         $epm_prov_port_notice .= ($epm_prov_port_notice !== '' ? ' ' : '') . htmlspecialchars($epm_prov_port_state['message']);
     }
+}
+
+// The chosen port is answered by something other than this module's own listener (normally FreePBX
+// Port Management's HTTP Provisioning, whose document root is /tftpboot): switch on folder listings
+// there too, so /PhoneSettings and /tftpboot can be browsed on whichever port is chosen.
+if ($sysadmin_redirect && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset($_POST['save_global'])
+    && is_array($epm_prov_port_state) && $epm_prov_port_state['state'] === 'serving'
+    && epm_own_listener_port() !== (int)yealink_epm_prov_port() && epm_ctl_status() === 'ready') {
+    $ab = epm_apply_browse();
+    $epm_prov_port_notice .= ($epm_prov_port_notice !== '' ? ' ' : '') . htmlspecialchars($ab['message']);
 }
 
 if (isset($_GET['action']) && $_GET['action'] === 'check_prov_port') {
@@ -1320,6 +1454,161 @@ if (!function_exists('epm_build_autop_block')) {
     }
 }
 
+// ============================================================================
+// Folder password protection. Whatever Server Username / Password is saved in
+// Global Settings is also made the HTTP Basic login for /PhoneSettings and
+// /tftpboot (the folders phones download from over HTTP), so the phone's own
+// auto_provision.server.username/password lines match what Apache asks for.
+// Blank username or password = IP-only restriction, as before.
+// NOTE: TFTP itself has no authentication; this only protects the HTTP side.
+// ============================================================================
+if (!function_exists('epm_folder_auth_active')) {
+    function epm_folder_auth_active($set = null) {
+        static $on = false;
+        if ($set !== null) { $on = (bool)$set; }
+        return $on;
+    }
+}
+if (!function_exists('epm_folder_auth_dir')) {
+    function epm_folder_auth_dir() { return '/var/lib/asterisk/yealink_epm_auth'; }
+}
+if (!function_exists('epm_folder_auth_targets')) {
+    function epm_folder_auth_targets() {
+        $t = [];
+        if (is_dir('/tftpboot')) { $t[] = '/tftpboot/.htaccess'; }
+        if (is_dir('/var/www/html/PhoneSettings')) { $t[] = '/var/www/html/PhoneSettings/.htaccess'; }
+        return $t;
+    }
+}
+if (!function_exists('epm_folder_htaccess')) {
+    // $htpasswd_path = '' gives the original LAN-only file (must stay identical to install.php's).
+    function epm_folder_htaccess($htpasswd_path = '') {
+        $ips = ['127.0.0.1', '::1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', 'fc00::/7'];
+        $c  = "Options +Indexes +FollowSymLinks\nDirectoryIndex disabled\n\n";
+        if ($htpasswd_path !== '') {
+            $c .= "<IfModule mod_auth_basic.c>\n<IfModule mod_authn_file.c>\n<IfModule mod_authz_user.c>\n";
+            $c .= "AuthType Basic\nAuthName \"Yealink Provisioning\"\nAuthUserFile {$htpasswd_path}\n";
+            $c .= "<RequireAll>\n    <RequireAny>\n";
+            foreach ($ips as $ip) { $c .= "        Require ip {$ip}\n"; }
+            $c .= "    </RequireAny>\n    Require valid-user\n</RequireAll>\n";
+            $c .= "</IfModule>\n</IfModule>\n</IfModule>\n";
+        } else {
+            $c .= "<IfModule mod_authz_core.c>\n";
+            foreach ($ips as $ip) { $c .= "    Require ip {$ip}\n"; }
+            $c .= "</IfModule>\n";
+        }
+        $c .= "<IfModule !mod_authz_core.c>\n    Order deny,allow\n    Deny from all\n    Allow from 127.0.0.1\n"
+            . "    Allow from 10.0.0.0/8\n    Allow from 172.16.0.0/12\n    Allow from 192.168.0.0/16\n</IfModule>\n\n";
+        // With a username/password set the folders are login-protected, so openvpn and vpnkeys are
+        // allowed to show in the listing; ovpn_mgr and yealink_epm stay hidden. Without a password
+        // the original full IndexIgnore line is used.
+        $c .= ($htpasswd_path !== '' ? "IndexIgnore ovpn_mgr yealink_epm" : "IndexIgnore openvpn ovpn_mgr vpnkeys yealink_epm fakekeys") . "\n\n";
+        return $c;
+    }
+}
+if (!function_exists('epm_apply_folder_auth')) {
+    // Returns a one-line status message for the Global Settings status bar.
+    function epm_apply_folder_auth($user, $pass) {
+        $targets = epm_folder_auth_targets();
+        if (!$targets) { return 'No provisioning folders found to protect.'; }
+        $write = function($content) use ($targets) {
+            foreach ($targets as $f) {
+                @file_put_contents($f, $content);
+                @chown($f, 'asterisk');
+                @chmod($f, 0644);
+            }
+        };
+        $dir = epm_folder_auth_dir();
+        epm_folder_auth_active(false);
+
+        if ($user === '' || $pass === '') {
+            $write(epm_folder_htaccess(''));
+            @unlink($dir . '/.htpasswd');
+            return ($user !== '' || $pass !== '')
+                ? 'Folder password NOT enabled: enter both a username and a password.'
+                : 'Provisioning folders are LAN-restricted only (no password set).';
+        }
+        if (preg_match('/[:\s]/', $user)) {
+            return 'Folder password NOT applied: the username cannot contain spaces or a colon.';
+        }
+
+        // Keep the hash file outside the web root and outside /tftpboot (TFTP would serve it).
+        $htpasswd = $dir . '/.htpasswd';
+        if (!is_dir($dir)) { @mkdir($dir, 0755, true); @chown($dir, 'asterisk'); }
+        if (!is_dir($dir) || !is_writable($dir)) {
+            $htpasswd = '/var/www/html/PhoneSettings/.htpasswd';   // Apache never serves .ht* files
+        }
+        $hash = password_hash($pass, PASSWORD_BCRYPT);           // Apache 2.4 reads $2y$
+        if (@file_put_contents($htpasswd, $user . ':' . $hash . "\n") === false) {
+            return "Folder password NOT applied: could not write {$htpasswd}.";
+        }
+        @chown($htpasswd, 'asterisk');
+        @chmod($htpasswd, 0644);
+
+        $write(epm_folder_htaccess($htpasswd));
+
+        // Self-test: a 500 means Apache choked on the new .htaccess -> put the old one back.
+        $bad = false; $challenged = false;
+        foreach (array_unique([80, yealink_epm_prov_port()]) as $port) {
+            $r = yealink_epm_http_probe('127.0.0.1', $port, '127.0.0.1', '/PhoneSettings/');
+            if ($r['connected'] && $r['code'] === 500) { $bad = true; }
+            if ($r['connected'] && $r['code'] === 401) { $challenged = true; }
+        }
+        if ($bad) {
+            $write(epm_folder_htaccess(''));
+            @unlink($htpasswd);
+            return 'Folder password NOT applied: Apache returned an error (is AllowOverride enabled and mod_auth_basic loaded?). Reverted to LAN-only.';
+        }
+        epm_folder_auth_active(true);
+        return $challenged
+            ? 'Provisioning folders now require the Server Username/Password (verified). Phones not yet holding these credentials will get 401 until they are set.'
+            : 'Provisioning folder password written; could not verify it over HTTP (port 80/shift port did not answer 401).';
+    }
+}
+
+// ============================================================================
+// openvpn / vpnkeys subfolders. ovpn_mgr puts an index.html ("Directory browsing disabled") and a
+// .htaccess with "Options -Indexes" in each, which makes the folder 403. While the folder login is
+// active (Server Username + Password set) those .htaccess files are replaced so the folder can be
+// browsed (still behind the parent's LAN-only rule + login, which the child inherits - it has no
+// Require lines on purpose). When the login is cleared, our file is put back to "Options -Indexes".
+// A .htaccess that has other content is never touched, only reported.
+// NOTE: vpnkeys holds each phone's private key package, so listing it is only done behind the login.
+// ============================================================================
+if (!function_exists('epm_unblock_vpn_dirs')) {
+    function epm_unblock_vpn_dirs($auth_on) {
+        $marker = "# yealink_epm: browsing enabled while folder login is active\n";
+        $open   = $marker . "Options +Indexes +FollowSymLinks\nIndexIgnore index.html\n";
+        $locked = "Options -Indexes\n";
+        $opened = []; $relocked = []; $left = [];
+        foreach (['/var/www/html/PhoneSettings', '/tftpboot'] as $root) {
+            foreach (['openvpn', 'vpnkeys'] as $name) {
+                $d = $root . '/' . $name;
+                if (!is_dir($d)) { continue; }
+                @chmod($d, (fileperms($d) & 07777) | 0005);        // world read + traverse
+                $ht  = $d . '/.htaccess';
+                $cur = is_file($ht) ? (string)@file_get_contents($ht) : null;
+                $ours      = $cur !== null && strpos($cur, $marker) !== false;
+                $swappable = $cur === null || $ours
+                    || preg_match('/^\s*(Options\s+-Indexes|Require\s+all\s+denied|Deny\s+from\s+all)\s*$/mi', $cur);
+                if (!$swappable) { $left[] = $name . ' (has its own .htaccess)'; continue; }
+                if ($auth_on) {
+                    if ($cur === $open) { $opened[] = $name; continue; }
+                    if (@file_put_contents($ht, $open) !== false) { @chown($ht, 'asterisk'); @chmod($ht, 0644); $opened[] = $name; }
+                    else { $left[] = $name . ' (could not write .htaccess)'; }
+                } elseif ($ours) {
+                    if (@file_put_contents($ht, $locked) !== false) { $relocked[] = $name; }
+                }
+            }
+        }
+        $msg = '';
+        if ($opened)   { $msg .= 'Browsing enabled for: ' . implode(', ', array_unique($opened)) . '.'; }
+        if ($relocked) { $msg .= ($msg ? ' ' : '') . 'Browsing disabled again for: ' . implode(', ', array_unique($relocked)) . '.'; }
+        if ($left)     { $msg .= ($msg ? ' ' : '') . 'Not changed: ' . implode(', ', array_unique($left)) . '.'; }
+        return $msg;
+    }
+}
+
 function generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_target, $tftp_dir, $sysadmin_redirect) {
     $raw_server = !empty($formData['server_ip']) ? $formData['server_ip'] : $default_server_target;
     
@@ -1420,6 +1709,8 @@ $saved_global_timezone_name = $detected_tz_info['name'];
 $saved_global_ntp_server1 = $detected_host;
 $saved_global_ntp_server2 = "pool.ntp.org";
 $saved_global_dialnow_timeout = "4";
+$saved_global_autop_user = "";
+$saved_global_autop_pass = "";
 $file_dialnow_patterns = [];
 $global_cfg_file = $tftp_dir . "y000000000000.cfg";
 
@@ -1463,6 +1754,12 @@ if (file_exists($global_cfg_file)) {
             }
             if (preg_match('/^local_time\.ntp_server2\s*=\s*(.+)$/i', $g_line, $gm)) {
                 $saved_global_ntp_server2 = trim($gm[1]);
+            }
+            if (preg_match('/^(?:static\.)?auto_provision\.server\.username\s*=\s*(.*)$/i', $g_line, $gm)) {
+                $saved_global_autop_user = trim($gm[1]);
+            }
+            if (preg_match('/^(?:static\.)?auto_provision\.server\.password\s*=\s*(.*)$/i', $g_line, $gm)) {
+                $saved_global_autop_pass = trim($gm[1]);
             }
             if (preg_match('/^phone_setting\.(?:dialnow_delay|inter_digit_time)\s*=\s*(\d+)$/i', $g_line, $gm)) {
                 $saved_global_dialnow_timeout = trim($gm[1]);
@@ -2003,15 +2300,18 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_device_overrides' && !emp
     $ov_builtin = [];
     foreach ($builtin_ringtones as $rv => $rl) { $ov_builtin[] = [$rv, $rl]; }
 
-    $ov_keys = function ($prefix, $count) use ($ov_eff) {
+    // $src is the map to read from: the effective values (template + overrides) by default, or
+    // the template's own values ($ov_base) when building the "reset to template defaults" data.
+    $ov_keys = function ($prefix, $count, $src = null) use ($ov_eff) {
+        if ($src === null) { $src = $ov_eff; }
         $rows = [];
         for ($i = 1; $i <= $count; $i++) {
             $rows[] = [
-                'type'   => $ov_eff["{$prefix}.{$i}.type"] ?? ($i === 1 && $prefix === 'linekey' ? '15' : '16'),
-                'value'  => $ov_eff["{$prefix}.{$i}.value"] ?? '',
-                'label'  => $ov_eff["{$prefix}.{$i}.label"] ?? '',
-                'pickup' => $ov_eff["{$prefix}.{$i}.pickup_value"] ?? '',
-                'line'   => $ov_eff["{$prefix}.{$i}.line"] ?? '1',
+                'type'   => $src["{$prefix}.{$i}.type"] ?? ($i === 1 && $prefix === 'linekey' ? '15' : '16'),
+                'value'  => $src["{$prefix}.{$i}.value"] ?? '',
+                'label'  => $src["{$prefix}.{$i}.label"] ?? '',
+                'pickup' => $src["{$prefix}.{$i}.pickup_value"] ?? '',
+                'line'   => $src["{$prefix}.{$i}.line"] ?? '1',
             ];
         }
         return $rows;
@@ -2023,39 +2323,70 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_device_overrides' && !emp
     if (preg_match('/^#\s*Expansion\s*Count\s*:\s*(\d+)/im', $ov_base_text, $ec)) { $ov_exp_count = (int)$ec[1]; }
     $ov_exp_size  = (int)($expansion_key_sizes[$ov_exp_model] ?? 0);
     list($ov_linekey_count, $ov_base_mem, $ov_mem_total) = epm_ov_key_counts($ov_model, $ov_spec, $ov_base_text, $ov_exp_size, $ov_exp_count);
-    $ov_mem_rows = [];
-    for ($mi = 1; $mi <= $ov_mem_total; $mi++) {
-        list($mp) = epm_memkey_prefix($mi, $ov_base_mem, $ov_exp_size);
-        $ov_mem_rows[] = [
-            'type'   => $ov_eff["{$mp}.type"] ?? '16',
-            'value'  => $ov_eff["{$mp}.value"] ?? '',
-            'label'  => $ov_eff["{$mp}.label"] ?? '',
-            'pickup' => $ov_eff["{$mp}.pickup_value"] ?? '',
-            'line'   => $ov_eff["{$mp}.line"] ?? '1',
-        ];
-    }
+    $ov_mem_build = function (array $src) use ($ov_mem_total, $ov_base_mem, $ov_exp_size) {
+        $rows = [];
+        for ($mi = 1; $mi <= $ov_mem_total; $mi++) {
+            list($mp) = epm_memkey_prefix($mi, $ov_base_mem, $ov_exp_size);
+            $rows[] = [
+                'type'   => $src["{$mp}.type"] ?? '16',
+                'value'  => $src["{$mp}.value"] ?? '',
+                'label'  => $src["{$mp}.label"] ?? '',
+                'pickup' => $src["{$mp}.pickup_value"] ?? '',
+                'line'   => $src["{$mp}.line"] ?? '1',
+            ];
+        }
+        return $rows;
+    };
+    $ov_mem_rows = $ov_mem_build($ov_eff);
 
-    $ov_prog = [];
     $ov_prog_ids = $prog_key_models[$ov_model] ?? $prog_key_models['manual'];
-    foreach ($ov_prog_ids as $pid) {
-        $def = epm_prog_key_default($ov_model, $pid, $prog_meta);
-        $t = $ov_eff["programablekey.{$pid}.type"] ?? '';
-        $ov_prog[] = [
-            'id'    => $pid,
-            'name'  => $prog_key_names[$pid] ?? ("Key {$pid}"),
-            'type'  => ($t !== '' && ctype_digit($t)) ? $t : (string)$def,
-            'line'  => $ov_eff["programablekey.{$pid}.line"] ?? '1',
-            'value' => $ov_eff["programablekey.{$pid}.value"] ?? '',
-            'label' => $ov_eff["programablekey.{$pid}.label"] ?? '',
-            'hist'  => $ov_eff["programablekey.{$pid}.history_type"] ?? '0',
-        ];
-    }
+    $ov_prog_build = function (array $src) use ($ov_prog_ids, $ov_model, $prog_meta, $prog_key_names) {
+        $rows = [];
+        foreach ($ov_prog_ids as $pid) {
+            $def = epm_prog_key_default($ov_model, $pid, $prog_meta);
+            $t = $src["programablekey.{$pid}.type"] ?? '';
+            $rows[] = [
+                'id'    => $pid,
+                'name'  => $prog_key_names[$pid] ?? ("Key {$pid}"),
+                'type'  => ($t !== '' && ctype_digit($t)) ? $t : (string)$def,
+                'line'  => $src["programablekey.{$pid}.line"] ?? '1',
+                'value' => $src["programablekey.{$pid}.value"] ?? '',
+                'label' => $src["programablekey.{$pid}.label"] ?? '',
+                'hist'  => $src["programablekey.{$pid}.history_type"] ?? '0',
+            ];
+        }
+        return $rows;
+    };
+    $ov_prog = $ov_prog_build($ov_eff);
 
     $ov_custom_lines = [];
     foreach (preg_split('/\R/', $ov_text) as $cl) {
         $cl = trim($cl);
         if ($cl === '' || $cl[0] === '#') { continue; }
         if (preg_match('/^([A-Za-z0-9_.\-]+)\s*=/', $cl, $cm) && !epm_ov_is_managed_key($cm[1])) { $ov_custom_lines[] = $cl; }
+    }
+
+    // Template-side values for the Edit window's undo arrows (no device overrides applied).
+    $ov_base_popups = [];
+    foreach (['voice_mail', 'missed_call', 'forward_call', 'text_message'] as $pp) {
+        $ov_base_popups[$pp] = (($ov_base["features.{$pp}_popup.enable"] ?? '1') === '0') ? '0' : '1';
+    }
+
+    // The template's own Custom Key / Value Additions (the last section of the inherited template),
+    // read the same way the Template Manager reads them back, so the Edit window can show them
+    // as inherited values. Keys the Edit window manages itself are left out.
+    $ov_tpl_custom = [];
+    $ov_tcm = '##### Template Custom Additions #####';
+    if (($ov_tcp = strpos($ov_base_text, $ov_tcm)) !== false) {
+        foreach (preg_split('/\R/', substr($ov_base_text, $ov_tcp + strlen($ov_tcm))) as $tcl) {
+            $tcl = trim($tcl);
+            if ($tcl === '' || $tcl[0] === '#' || epm_is_ringtone_marker_line($tcl)) { continue; }
+            if (strpos($tcl, 'distinctive_ring_tones.') === 0 || strpos($tcl, 'account.1.alert_info_') === 0 || $tcl === 'features.alert_info_tone = 1') { continue; }
+            if (preg_match('/^([A-Za-z0-9_.\-]+)\s*=\s*(.*)$/', $tcl, $tcm) && !epm_ov_is_managed_key($tcm[1])) {
+                $tv = trim($tcm[2]);
+                $ov_tpl_custom[] = ['key' => $tcm[1], 'value' => ($tv === '%NULL%') ? '' : $tv];
+            }
+        }
     }
 
     echo json_encode([
@@ -2069,6 +2400,15 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_device_overrides' && !emp
         'linekeys'   => $ov_keys('linekey', $ov_linekey_count),
         'memkeys'    => $ov_mem_rows,
         'prog'       => $ov_prog,
+        // The template's own values (no device overrides), used by the Reset to Template Defaults buttons.
+        'tplCustom'  => $ov_tpl_custom,
+        'base'       => [
+            'popups'   => $ov_base_popups,
+            'ringtone' => $ov_base['account.1.ringtone.ring_type'] ?? 'Common',
+            'linekeys' => $ov_keys('linekey', $ov_linekey_count, $ov_base),
+            'memkeys'  => $ov_mem_build($ov_base),
+            'prog'     => $ov_prog_build($ov_base),
+        ],
         'progTypes'  => $prog_key_types,
         'progFields' => $prog_key_type_fields,
         'custom'     => implode("\n", $ov_custom_lines),
@@ -2528,14 +2868,34 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
             exit;
         }
     } else {
-        // revokeExtensionAndRestart() is ovpn_mgr's own revocation: it
-        // revokes the cert against ovpn_mgr's CA, regenerates crl.pem,
-        // deletes the cert/key and any built packages for this extension,
-        // and restarts the daemon (via the same scoped ovpnctl helper
-        // ovpn_mgr's own "Revoke" button uses) so the daemon actually
-        // starts rejecting this client - a plain file delete or service
-        // reload does not do that on its own.
-        revokeExtensionAndRestart($ovpn_paths, $ext);
+        // revokeExtension() is ovpn_mgr's own revocation: it revokes the
+        // cert against ovpn_mgr's CA, regenerates crl.pem, deletes the
+        // cert/key and any built packages for this extension. OpenVPN
+        // re-reads crl-verify's target file on every new connection by
+        // itself, so the revocation needs no daemon restart (restarting
+        // drops every connected phone). The only restart ever needed is
+        // the one-time addition of the crl-verify directive to the server
+        // config, so - exactly like ovpn_mgr's own Revoke button - restart
+        // only if the config text actually changed, and never if the admin
+        // has deliberately stopped the server (.stopped sentinel).
+        if (function_exists('revokeExtension')) {
+            $conf_before_revoke = (string)@file_get_contents($ovpn_paths['serverConf']);
+            revokeExtension($ovpn_paths['pkiDir'], $ovpn_paths['serverConf'], $ovpn_paths['crlFile'], $ovpn_paths['pkgDir'], $ext);
+            $conf_changed = ((string)@file_get_contents($ovpn_paths['serverConf']) !== $conf_before_revoke);
+            if ($conf_changed && !file_exists("{$ovpn_paths['baseDir']}/.stopped")) {
+                stopOpenVpnServer($ovpn_paths['ovpnctl']);
+                startOpenVpnServer($ovpn_paths['ovpnctl'], $ovpn_paths['serverConf'], $ovpn_paths['baseDir'], $ovpn_paths['serverKey']);
+            }
+        } else {
+            // Older ovpn_mgr without a separate revokeExtension(): fall back to
+            // the combined helper (this one restarts the daemon).
+            revokeExtensionAndRestart($ovpn_paths, $ext);
+        }
+        // Newer ovpn_mgr's revokeExtension() already drops the live tunnel; for
+        // older builds do it here so the revoked phone doesn't stay connected.
+        if (function_exists('ovpn_mgr_kill_extension_sessions')) {
+            ovpn_mgr_kill_extension_sessions($ext);
+        }
 
         $cfg_path = $tftp_dir . $mac . ".cfg";
         if (file_exists($cfg_path)) {
@@ -3247,8 +3607,8 @@ $formData = [
     'auto_provision_weekly_end_time' => '23:59',
     'auto_provision_weekly_dayofweek' => '0',
     'auto_provision_dhcp_option_enable' => '1',
-    'auto_provision_username' => '',
-    'auto_provision_password' => '',
+    'auto_provision_username' => $saved_global_autop_user,
+    'auto_provision_password' => $saved_global_autop_pass,
     'active_tab' => $_POST['active_tab']
         ?? ((isset($_GET['tab']) && in_array($_GET['tab'], ['tab_global', 'tab_template', 'tab_devices'], true)) ? $_GET['tab'] : 'tab_global')
 ];
@@ -3578,6 +3938,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
 // 10. DEVICE MANAGER ACTIONS & TEMPLATE FILE LOADERS
 // ============================================================================
 
+if ($_SERVER["REQUEST_METHOD"] == "POST" && (isset($_POST['save_template']) || isset($_POST['upload_template_file'])
+        || isset($_POST['delete_target_file']) || isset($_POST['flush_template_ringtones']) || isset($_POST['load_template']))) {
+    epm_redirect_after_post($formData['active_tab'], $status, (string)($_POST['template_to_load'] ?? ''));
+}
+
+// Landing after that redirect: ?tpl=<file> says which template to show in the editor.
+$epm_tpl_from_get = false;
+if ($_SERVER["REQUEST_METHOD"] !== "POST" && !empty($_GET['tpl'])) {
+    $_POST['template_to_load'] = basename((string)$_GET['tpl']);
+    $epm_tpl_from_get = true;
+}
+
 if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
     $tpl_filename = basename($_POST['template_to_load'] ?? '');
     $tpl_path = $template_dir . $tpl_filename;
@@ -3791,6 +4163,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
         $filtered_exts = array_filter($assigned_exts);
         if (count($filtered_exts) !== count(array_unique($filtered_exts))) {
             $status = "<span style='color:#dc3545;'><b>Error:</b> Duplicate extensions detected in submission! Each phone must have a unique extension assigned.</span>";
+            $epm_device_action_failed = true;   // keep the typed rows: render directly, no redirect
             goto skip_device_rebuild;
         }
     }
@@ -3997,6 +4370,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
     }
 
     skip_device_rebuild:;
+
+    // Post/Redirect/Get: send the browser back to the Device Manager with a plain
+    // GET so a reload doesn't pop Firefox's "resend form data" prompt. The status
+    // message travels in the session. Validation errors skip this (see above).
+    if (empty($epm_device_action_failed)) {
+        $_SESSION['epm_flash_status'] = $status;
+        $epm_redirect_url = 'config.php?display=yealink_epm&tab=tab_devices';
+        if (!headers_sent()) {
+            header('Location: ' . $epm_redirect_url);
+        } else {
+            echo '<script>window.location.replace(' . json_encode($epm_redirect_url) . ');</script>'
+               . '<noscript><meta http-equiv="refresh" content="0;url=' . htmlspecialchars($epm_redirect_url) . '"></noscript>';
+        }
+        exit;
+    }
 }
 
 // ============================================================================
@@ -4017,7 +4405,7 @@ foreach ($ringtone_filenames as $rf) {
     }
 }
 
-if (!isset($_POST['uploaded_ringtones']) && $_SERVER["REQUEST_METHOD"] !== "POST") {
+if (!isset($_POST['uploaded_ringtones']) && $_SERVER["REQUEST_METHOD"] !== "POST" && !$epm_tpl_from_get) {
     $formData['uploaded_ringtones'] = $ringtone_filenames;
 }
 
@@ -4228,8 +4616,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['save_global'])) {
 
     $formData['prov_http_port'] = yealink_epm_prov_port();   // the validated/effective port, not raw POST text
     $generated_common_cfg = generateAndSaveGlobalConfig($formData, $cfg_version, $default_server_target, $tftp_dir, $sysadmin_redirect);
+    $epm_auth_msg = epm_apply_folder_auth($formData['auto_provision_username'], $formData['auto_provision_password']);
     $status = "Saved Global Settings to " . count(yealinkGlobalCfgMap()) . " y-config file(s) in {$tftp_dir}"
-        . ($epm_prov_port_notice !== '' ? ' ' . $epm_prov_port_notice : '');
+        . ($epm_prov_port_notice !== '' ? ' ' . $epm_prov_port_notice : '')
+        . ' ' . $epm_auth_msg
+        . ' ' . epm_unblock_vpn_dirs(epm_folder_auth_active());
+    epm_redirect_after_post('tab_global', $status);
 }
 
 $max_dialnow_slots = (int)($formData['dialnow_count'] ?? 1);

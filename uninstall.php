@@ -128,6 +128,10 @@ foreach ($htaccess_files as $htaccess_path) {
     }
 }
 
+@unlink('/var/lib/asterisk/yealink_epm_auth/.htpasswd');
+@rmdir('/var/lib/asterisk/yealink_epm_auth');
+@unlink($phone_settings_dir . '/.htpasswd');
+
 // ============================================================================
 // 3b. REMOVE THE FAKEKEYS PLACEHOLDER (empty null.tar created by install.php)
 // ============================================================================

@@ -9,6 +9,9 @@
 #   status           prints the port Apache is currently serving provisioning on (if any)
 #   diagnose         read-only: lists Redirect / Rewrite rules found in Apache's config and the
 #                    web-root .htaccess files (to find what is redirecting a port to https)
+#   browse           makes Apache honour the .htaccess files in /tftpboot (LAN-only rule, folder
+#                    login, hidden folders, listings) on listeners that use it as their document
+#                    root, e.g. FreePBX Port Management's HTTP Provisioning port
 #   setport <port>   makes Apache serve /PhoneSettings and /tftpboot over plain HTTP on <port>
 #
 # setport adds a Listen + a small virtual host that serves ONLY those two folders (their own
@@ -16,7 +19,7 @@
 # the Apache config before reloading and rolls back if Apache rejects it, and opens the port
 # in ufw / firewalld when one is active.
 
-VERSION="2"
+VERSION="5"
 TFTP_ROOT="/tftpboot"
 WEBROOT="__WEBROOT__"
 [ -d "$WEBROOT/PhoneSettings" ] || WEBROOT="/var/www/html"
@@ -40,18 +43,59 @@ command -v "$APACHE_TEST" >/dev/null 2>&1 || APACHE_TEST="apachectl"
 
 current_port() { [ -f "$CONF" ] && sed -n 's/^Listen \([0-9]\{1,5\}\)$/\1/p' "$CONF" | head -n1; }
 
-diagnose() {
-    local CONFDIR f
-    if [ "$FLAVOR" = "debian" ]; then CONFDIR="/etc/apache2"; else CONFDIR="/etc/httpd"; fi
-    echo "Redirect / rewrite rules found (a rule that sends http to https can catch the shift port too):"
-    {
-        grep -RInE '^[[:space:]]*(Redirect|RedirectMatch|RedirectPermanent|RewriteRule|RewriteCond|RewriteOptions)[[:space:]]' \
-            "$CONFDIR" --include='*.conf' 2>/dev/null | grep -v '/yealink_epm_prov.conf:'
-        for f in "$WEBROOT/.htaccess" "$WEBROOT/PhoneSettings/.htaccess" "$TFTP_ROOT/.htaccess"; do
-            [ -f "$f" ] && grep -nHE '^[[:space:]]*(Redirect|RedirectMatch|RedirectPermanent|RewriteRule|RewriteCond|RewriteOptions)[[:space:]]' "$f" 2>/dev/null
-        done
-    } | sed 's/[[:space:]]\+/ /g' | head -n 40
-    echo "(end of list)"
+# FreePBX Port Management's HTTP Provisioning site (listener on port 83 by default) uses /tftpboot
+# as its document root and sets "AllowOverride None" for it, so Apache ignores the .htaccess the
+# module writes there: no LAN-only rule, no folder login, no hidden folders, no DirectoryIndex
+# override. This drop-in sets AllowOverride All for /tftpboot so those rules apply on that port
+# exactly as they do on the others. It is installed as a *site* file (sites-enabled is read after
+# Sysadmin's sangoma.conf, and the later of two <Directory> blocks for the same folder wins), and
+# Sysadmin's own regenerated config is never edited. It only matches listeners whose document root
+# is /tftpboot itself.
+browse_on() {
+    local DROP DROP_NAME="yealink_epm_browse" BK="" OLD="" OLDBK=""
+    if [ "$FLAVOR" = "debian" ]; then
+        DROP="/etc/apache2/sites-available/${DROP_NAME}.conf"
+        OLD="/etc/apache2/conf-available/${DROP_NAME}.conf"      # 1.1.13/1.1.14 location (read too early)
+    else
+        DROP="/etc/httpd/conf.d/zz-${DROP_NAME}.conf"           # zz- so it is read after the other files
+    fi
+    [ -d "$TFTP_ROOT" ] || die "$TFTP_ROOT not found - run install_tftp.sh first."
+    [ -f "$DROP" ] && { BK="$(mktemp)"; cp -p "$DROP" "$BK"; }
+    if [ -n "$OLD" ] && [ -f "$OLD" ]; then
+        OLDBK="$(mktemp)"; cp -p "$OLD" "$OLDBK"
+        a2disconf "$DROP_NAME" >/dev/null 2>&1
+        rm -f "$OLD"
+    fi
+    cat > "$DROP" <<EOF2
+# Written by the Yealink EPM root helper - honour the module's .htaccess files for ${TFTP_ROOT}.
+# FreePBX Port Management's HTTP Provisioning site sets AllowOverride None for this folder; this
+# (read later) block turns it back on so the LAN-only rule, folder login and hidden folders apply.
+# To remove: a2dissite ${DROP_NAME}; rm ${DROP}; reload Apache.
+<Directory ${TFTP_ROOT}/>
+    AllowOverride All
+</Directory>
+EOF2
+    chmod 644 "$DROP"
+    [ "$FLAVOR" = "debian" ] && a2ensite "$DROP_NAME" >/dev/null 2>&1
+    local T
+    T="$("$APACHE_TEST" configtest 2>&1)"
+    if ! echo "$T" | grep -qi "Syntax OK"; then
+        if [ -n "$BK" ]; then cp -p "$BK" "$DROP"; rm -f "$BK"
+        else
+            [ "$FLAVOR" = "debian" ] && a2dissite "$DROP_NAME" >/dev/null 2>&1
+            rm -f "$DROP"
+        fi
+        if [ -n "$OLDBK" ]; then cp -p "$OLDBK" "$OLD"; a2enconf "$DROP_NAME" >/dev/null 2>&1; rm -f "$OLDBK"; fi
+        echo "$T" | grep -v "secure firewall" | head -n 6 >&2
+        die "Apache rejected the new configuration; nothing was changed."
+    fi
+    rm -f "$BK" "$OLDBK"
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl reload "$APACHE_SVC" >/dev/null 2>&1 || die "configuration saved, but Apache could not be reloaded - run: systemctl restart $APACHE_SVC"
+    else
+        service "$APACHE_SVC" reload >/dev/null 2>&1 || die "configuration saved, but Apache could not be reloaded - run: service $APACHE_SVC restart"
+    fi
+    say "Apache now honours the .htaccess files in $TFTP_ROOT"
 }
 
 case "$1" in
@@ -65,6 +109,10 @@ case "$1" in
         ;;
     diagnose)
         diagnose
+        exit 0
+        ;;
+    browse)
+        browse_on
         exit 0
         ;;
     setport)
@@ -100,54 +148,46 @@ else
     ERRLOG='logs/yealink_epm_prov_error.log'
 fi
 
-# Private document root that contains ONLY links to the two provisioning folders. Because it is
-# not under the web root, a .htaccess sitting in the web root (e.g. an http->https rule) is never
-# read for this port, and nothing else on the server can be reached through it.
-PROV_ROOT="/var/lib/yealink_epm/prov_root"
-mkdir -p "$PROV_ROOT" || die "could not create $PROV_ROOT"
-ln -sfn "$WEBROOT/PhoneSettings" "$PROV_ROOT/PhoneSettings"
-ln -sfn "$TFTP_ROOT"             "$PROV_ROOT/tftpboot"
-chmod 755 /var/lib/yealink_epm "$PROV_ROOT"
-
 BACKUP=""
 [ -f "$CONF" ] && { BACKUP="$(mktemp)"; cp -p "$CONF" "$BACKUP"; }
 
+# The listener mirrors FreePBX's own HTTP Provisioning site: the document root is the TFTP
+# folder, so a phone asking for /<mac>.cfg (the module's provisioning URL has no folder in it)
+# is answered, and /PhoneSettings and /tftpboot are aliased in so both can be browsed.
+# .htaccess files stay active (AllowOverride All) so the LAN-only rule and the folder login
+# keep working here.
 cat > "$CONF" <<EOF
 # Written by the Yealink EPM root helper - plain-HTTP provisioning listener.
 # Change the port from the module's Global Settings page; delete this file to remove it.
 Listen ${PORT}
 <VirtualHost *:${PORT}>
     ServerName yealink-epm-provisioning
-    DocumentRoot ${PROV_ROOT}
+    DocumentRoot ${TFTP_ROOT}
     ErrorLog ${ERRLOG}
 
     # Explicit mappings win over any server-wide Redirect that Apache would otherwise inherit.
-    Alias /PhoneSettings ${PROV_ROOT}/PhoneSettings
-    Alias /tftpboot      ${PROV_ROOT}/tftpboot
+    Alias /PhoneSettings ${WEBROOT}/PhoneSettings
+    Alias /tftpboot      ${TFTP_ROOT}
 
-    # Nothing is served by default...
-    <Directory ${PROV_ROOT}>
-        Options +FollowSymLinks
-        Require all denied
-    </Directory>
-
-    # ...except the provisioning folders (their own .htaccess keeps them LAN-only).
-    <Directory ${PROV_ROOT}/PhoneSettings>
-        Options +FollowSymLinks +Indexes
-        AllowOverride All
-        Require all granted
-    </Directory>
-    <Directory ${PROV_ROOT}/tftpboot>
-        Options +FollowSymLinks +Indexes
-        AllowOverride All
-        Require all granted
-    </Directory>
-    # Real folder behind /tftpboot and the links inside PhoneSettings
     <Directory ${TFTP_ROOT}>
         Options +FollowSymLinks +Indexes
+        DirectoryIndex disabled
+        IndexIgnore .??* *.php
         AllowOverride All
         Require all granted
     </Directory>
+    <Directory ${WEBROOT}/PhoneSettings>
+        Options +FollowSymLinks +Indexes
+        DirectoryIndex disabled
+        IndexIgnore .??* *.php
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    # Never serve dot-files or PHP from here
+    <FilesMatch "(^\\.|\\.php\$)">
+        Require all denied
+    </FilesMatch>
 </VirtualHost>
 EOF
 chmod 644 "$CONF"

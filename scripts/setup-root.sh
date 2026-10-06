@@ -5,7 +5,7 @@
 #   (add --yealink-only to skip the ovpn_mgr step below)
 #
 # It installs a small root-owned helper (/usr/local/sbin/yealink_epm_ctl) and a sudoers rule
-# that lets the web server user run only that helper's subcommands (version, status, diagnose,
+# that lets the web server user run only that helper's subcommands (version, status, diagnose, browse,
 # setport <port>). After this, choosing a different "HTTP Shift Port" in Global Settings is
 # applied by the page itself - no more SSH. The helper only ever edits one file,
 # yealink_epm_prov.conf, in Apache's config folder.
@@ -69,7 +69,7 @@ TMP="$(mktemp)"
 {
     echo "# Yealink Endpoint Manager: lets the web user apply the HTTP shift port. See setup-root.sh."
     for u in $WEB_USERS; do
-        echo "${u} ALL=(root) NOPASSWD: ${DEST} version, ${DEST} status, ${DEST} diagnose, ${DEST} setport [0-9]*"
+        echo "${u} ALL=(root) NOPASSWD: ${DEST} version, ${DEST} status, ${DEST} diagnose, ${DEST} browse, ${DEST} setport [0-9]*"
     done
 } > "$TMP"
 if ! visudo -cf "$TMP" >/dev/null 2>&1; then
@@ -85,7 +85,7 @@ grep -Rqs "includedir */etc/sudoers.d\|@includedir */etc/sudoers.d" /etc/sudoers
 OK_USERS=""
 for u in $WEB_USERS; do
     OUT="$(sudo -u "$u" sudo -n "$DEST" version 2>&1)"
-    if [ "$OUT" = "2" ]; then
+    if [ "$OUT" = "5" ]; then
         say "Self-test OK: $u can run the helper through sudo."
         OK_USERS="$OK_USERS $u"
     else

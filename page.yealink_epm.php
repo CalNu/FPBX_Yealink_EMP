@@ -250,6 +250,10 @@ function epmApplyProvPort(port) {
     .gen-section-title { border-bottom: 2px solid #007bff; padding-bottom: 5px; margin-top: 20px; color: #333; }
     .gen-tab-btn { padding: 10px 20px; cursor: pointer; background: #e9ecef; border: 1px solid #ccc; border-bottom: none; border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 5px; font-weight: bold; }
     .gen-tab-btn.active { background: #007bff; color: white; border-color: #007bff; }
+    /* Cockpit tab: logo-style blue with the plane icon; opens a new browser tab, never becomes 'active' */
+    #btn_cockpit, #btn_cockpit:hover { background: #0066cc !important; border-color: #004f9f !important; color: #fff !important; }
+    #btn_cockpit:hover { filter: brightness(1.12); }
+    #btn_cockpit .fa { margin-right: 3px; }
     .gen-tab-content { display: none; }
     .gen-tab-content.active { display: block; }
 
@@ -1571,6 +1575,14 @@ function toggleOvpnState(ext, mac, enable) {
         return 'tab_global';
     }
 
+    // Optional Cockpit tab: not a real tab, it opens Cockpit (https, on the port cockpit.socket uses)
+    // on this same host in a new browser tab. The Yealink page stays where it was.
+    function epmOpenCockpit(port, listening) {
+        if (!listening && !confirm('Cockpit is installed but nothing is listening on port ' + port +
+            ' (is cockpit.socket enabled?). Open it anyway?')) { return; }
+        window.open('https://' + window.location.hostname + ':' + port + '/', '_blank', 'noopener');
+    }
+
     function switchTab(tabId) {
         epmStore(EPM_TAB_KEY, tabId);
         var contents = document.querySelectorAll('.gen-tab-content');
@@ -2304,7 +2316,7 @@ function toggleOvpnState(ext, mac, enable) {
         checkUncheckedRingtonesState();
 
         // Only trust the server's tab when this page is the result of a form POST that named one.
-        var epmServerTab = <?= json_encode((($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (isset($_POST['active_tab']) || ($formData['active_tab'] ?? 'tab_global') !== 'tab_global')) ? ($formData['active_tab'] ?? null) : null) ?>;
+        var epmServerTab = <?= json_encode(((($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (isset($_POST['active_tab']) || ($formData['active_tab'] ?? 'tab_global') !== 'tab_global')) || isset($_GET['tab'])) ? ($formData['active_tab'] ?? null) : null) ?>;
         var epmHash = window.location.hash;
 
         switchTab(epmResolveInitialTab(epmServerTab, epmHash, epmRead(EPM_TAB_KEY)));
@@ -2445,6 +2457,24 @@ function toggleOvpnState(ext, mac, enable) {
     .epm-ov-row input { flex:1 1 110px; }
     .epm-ov-row select { flex:0 1 auto; }
     .epm-ov-row.epm-ov-locked { opacity:.55; }
+    .epm-key-modal-foot .gen-btn { margin:0 !important; }
+    .epm-ov-undo { flex:0 0 22px; width:22px; height:22px; padding:0; border:none; background:transparent; color:#2f7a4a; cursor:pointer; font-size:13px; line-height:1; visibility:hidden; }
+    .epm-ov-undo:hover { color:#c0392b; }
+    .epm-ov-row.epm-ov-changed .epm-ov-undo { visibility:visible; }
+    .epm-ov-row .epm-ov-diff { color:#c0392b; border-bottom-color:#c0392b; background:rgba(192,57,43,.09); }
+    .epm-ov-lbl { display:flex; align-items:center; gap:4px; }
+    .epm-ov-lbltxt.epm-ov-diff { color:#c0392b; font-weight:bold; }
+    .epm-ov-undo.show { visibility:visible; }
+    .epm-ov-ringrow { display:flex; align-items:center; gap:4px; }
+    .epm-ov-ringrow .epm-ov-sel { flex:1 1 auto; width:auto; min-width:0; }
+    .epm-ov-sel.epm-ov-diff { border-color:#c0392b; color:#c0392b; background:rgba(192,57,43,.09); }
+    .epm-ov-note { font-size:12px; opacity:.7; margin:0 0 6px 0; }
+    .epm-ov-crow input { font-family:monospace; font-size:12px; color:#c0392b; }
+    .epm-ov-crow input[data-c="key"] { flex:1 1 38%; }
+    .epm-ov-crow input[data-c="value"] { flex:1 1 52%; }
+    .epm-ov-crow[data-tpl="1"] input[data-c="key"] { color:#8a918c; }
+    .epm-ov-crow[data-tpl="1"]:not(.epm-ov-changed) input[data-c="value"] { color:#8a918c; }
+    .epm-ov-crow.epm-ov-changed input[data-c="value"] { background:rgba(192,57,43,.09); }
     .epm-ov-ta { width:100%; box-sizing:border-box; min-height:110px; font-family:monospace; font-size:12px; padding:8px; border:1px solid #b9d3c1; border-radius:4px; }
     .epm-ov-sel { width:100%; padding:6px; border:1px solid #b9d3c1; border-radius:4px; }
     #epm_ov_msg { font-size:12px; margin-right:auto; }
@@ -2472,9 +2502,9 @@ var epmOv = (function () {
             '<button type="button" class="gen-btn" onclick="closeEpmKeyModal(\'epmOvMain\')">Cancel</button> ' +
             '<button type="button" class="gen-btn" onclick="epmOv.save(false)">Save</button> ' +
             '<button type="button" class="gen-btn" onclick="epmOv.save(true)">Save &amp; Sync</button>', 'min(600px, 96vw)');
-        h += shell('epmOvLine', 'Line Keys', 'fa-th-list', 'epm_ov_line_body', '<span class="epm-key-modal-note">Only fields you change are saved as overrides.</span><button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal(\'epmOvLine\')">Done</button>', 'min(760px, 96vw)');
-        h += shell('epmOvMem', 'Memory Keys', 'fa-th', 'epm_ov_mem_body', '<span class="epm-key-modal-note">Built-in keys first, then any expansion module keys from the template.</span><button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal(\'epmOvMem\')">Done</button>', 'min(760px, 96vw)');
-        h += shell('epmOvProg', 'Programmable Keys', 'fa-keyboard-o', 'epm_ov_prog_body', '<span class="epm-key-modal-note">Only fields you change are saved as overrides.</span><button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal(\'epmOvProg\')">Done</button>', 'min(760px, 96vw)');
+        h += shell('epmOvLine', 'Line Keys', 'fa-th-list', 'epm_ov_line_body', '<span class="epm-key-modal-note">Only fields you change are saved as overrides.</span><button type="button" class="gen-btn" title="Show the template values for these keys. Press Save in Device Overrides to apply." onclick="epmOv.reset(\'line\')"><i class="fa fa-undo" aria-hidden="true"></i>&nbsp; Reset to Template Defaults</button><button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal(\'epmOvLine\')">Done</button>', 'min(760px, 96vw)');
+        h += shell('epmOvMem', 'Memory Keys', 'fa-th', 'epm_ov_mem_body', '<span class="epm-key-modal-note">Built-in keys first, then any expansion module keys from the template.</span><button type="button" class="gen-btn" title="Show the template values for these keys. Press Save in Device Overrides to apply." onclick="epmOv.reset(\'mem\')"><i class="fa fa-undo" aria-hidden="true"></i>&nbsp; Reset to Template Defaults</button><button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal(\'epmOvMem\')">Done</button>', 'min(760px, 96vw)');
+        h += shell('epmOvProg', 'Programmable Keys', 'fa-keyboard-o', 'epm_ov_prog_body', '<span class="epm-key-modal-note">Only fields you change are saved as overrides.</span><button type="button" class="gen-btn" title="Show the template values for these keys. Press Save in Device Overrides to apply." onclick="epmOv.reset(\'prog\')"><i class="fa fa-undo" aria-hidden="true"></i>&nbsp; Reset to Template Defaults</button><button type="button" class="gen-btn epm-key-modal-close" onclick="closeEpmKeyModal(\'epmOvProg\')">Done</button>', 'min(760px, 96vw)');
         var d = document.createElement('div');
         d.innerHTML = h;
         while (d.firstChild) document.body.appendChild(d.firstChild);
@@ -2496,7 +2526,7 @@ var epmOv = (function () {
         list.forEach(function (k, i) {
             var idx = i + 1, locked = (lockFirst && idx === 1);
             h += '<div class="epm-ov-row' + (locked ? ' epm-ov-locked' : '') + '" data-idx="' + idx + '">' +
-              '<span class="epm-ov-num">' + idx + '</span>' +
+              undoSlot() + '<span class="epm-ov-num">' + idx + '</span>' +
               '<select data-f="type"' + (locked ? ' disabled' : '') + '>' + typeOptions(data.dss, k.type) + '</select>' +
               '<input data-f="value" placeholder="Value / Extension" value="' + esc(k.value) + '"' + (locked ? ' disabled' : '') + '>' +
               '<input data-f="label" placeholder="Label" value="' + esc(k.label) + '"' + (locked ? ' disabled' : '') + '>' +
@@ -2510,7 +2540,7 @@ var epmOv = (function () {
         var h = '';
         data.prog.forEach(function (k) {
             h += '<div class="epm-ov-row" data-idx="' + k.id + '">' +
-              '<span class="epm-ov-name">' + esc(k.name) + '</span>' +
+              undoSlot() + '<span class="epm-ov-name">' + esc(k.name) + '</span>' +
               '<select data-f="type" onchange="epmOv.progType(this)">' + typeOptions(data.progTypes, k.type) + '</select>' +
               '<select data-f="line" data-show="line">' + lineOptions(data.maxLines, k.line) + '</select>' +
               '<input data-f="value" data-show="value" placeholder="Value" value="' + esc(k.value) + '">' +
@@ -2529,31 +2559,263 @@ var epmOv = (function () {
         });
     }
 
+    function undoBtn(extra) {
+        return '<button type="button" class="epm-ov-undo" title="Reset to template default" tabindex="-1" ' + extra + '><i class="fa fa-undo" aria-hidden="true"></i></button>';
+    }
+
+    // Custom Key / Value Additions as rows: lines from the template are shown in grey (their
+    // value can be changed, which makes it a red override); lines the device adds are red.
+    function customRowHtml(key, value, base, isTpl) {
+        return '<div class="epm-ov-row epm-ov-crow' + (isTpl ? '' : ' epm-ov-changed') + '" data-tpl="' + (isTpl ? '1' : '0') + '"' + (isTpl ? ' data-base="' + esc(base) + '"' : '') + '>' +
+          (isTpl ? undoBtn('onclick="epmOv.customUndo(this)"')
+                 : '<button type="button" class="epm-ov-undo" title="Remove this line" tabindex="-1" onclick="epmOv.customUndo(this)"><i class="fa fa-times" aria-hidden="true"></i></button>') +
+          '<input data-c="key" placeholder="key" spellcheck="false" value="' + esc(key) + '"' + (isTpl ? ' readonly tabindex="-1"' : '') + '>' +
+          '<span>=</span>' +
+          '<input data-c="value" placeholder="value" spellcheck="false" value="' + esc(value) + '"></div>';
+    }
+    function customRowsHtml() {
+        var tpl = (data.tplCustom || []).map(function (t) { return { key: t.key, base: t.value, value: t.value, used: false }; });
+        var added = [];
+        String(data.custom || '').split(/\r?\n/).forEach(function (ln) {
+            var m = /^\s*([A-Za-z0-9_.\-]+)\s*=\s*(.*?)\s*$/.exec(ln);
+            if (!m) return;
+            var v = (m[2] === '%NULL%') ? '' : m[2], hit = null;
+            for (var i = 0; i < tpl.length; i++) { if (!tpl[i].used && tpl[i].key.toLowerCase() === m[1].toLowerCase()) { hit = tpl[i]; break; } }
+            if (hit) { hit.used = true; hit.value = v; } else { added.push({ key: m[1], value: v }); }
+        });
+        var h = '';
+        tpl.forEach(function (t) { h += customRowHtml(t.key, t.value, t.base, true); });
+        added.forEach(function (a) { h += customRowHtml(a.key, a.value, '', false); });
+        return h;
+    }
+    function customRefresh(row) {
+        if (row.getAttribute('data-tpl') !== '1') { row.classList.add('epm-ov-changed'); return; }
+        var v = row.querySelector('input[data-c="value"]');
+        row.classList.toggle('epm-ov-changed', !!v && v.value.trim() !== (row.getAttribute('data-base') || ''));
+    }
+    function customAdd() {
+        var list = el('epm_ov_custom_list');
+        if (!list) return;
+        var d = document.createElement('div');
+        d.innerHTML = customRowHtml('', '', '', false);
+        var row = d.firstChild;
+        list.appendChild(row);
+        var k = row.querySelector('input[data-c="key"]');
+        if (k) k.focus();
+    }
+    function customUndo(btn) {
+        var row = btn.closest('.epm-ov-crow');
+        if (!row) return;
+        if (row.getAttribute('data-tpl') === '1') {
+            row.querySelector('input[data-c="value"]').value = row.getAttribute('data-base') || '';
+            customRefresh(row);
+            var msg = el('epm_ov_msg');
+            if (msg) { msg.textContent = 'Line reset to template value - press Save to apply.'; }
+        } else {
+            row.parentNode.removeChild(row);
+        }
+    }
+    // Only the lines that differ from the template go into the override block.
+    function collectCustom() {
+        var lines = [], bad = '';
+        var rows = el('epm_ov_custom_list') ? el('epm_ov_custom_list').querySelectorAll('.epm-ov-crow') : [];
+        Array.prototype.forEach.call(rows, function (r) {
+            var k = r.querySelector('input[data-c="key"]').value.trim();
+            var v = r.querySelector('input[data-c="value"]').value.trim();
+            if (r.getAttribute('data-tpl') === '1') {
+                if (v === (r.getAttribute('data-base') || '')) return;
+                lines.push(k + ' = ' + (v === '' ? '%NULL%' : v));
+                return;
+            }
+            if (k === '' && v === '') return;
+            if (!/^[A-Za-z0-9_.\-]+$/.test(k)) { if (!bad) bad = k === '' ? '(blank key)' : k; return; }
+            if (v === '') return;
+            lines.push(k + ' = ' + v);
+        });
+        return { text: lines.join('\n'), bad: bad };
+    }
+
+    // Undo arrows + red highlight for the notification toggles and the ringtone.
+    function refreshMain() {
+        if (!data || !data.base) return;
+        var main = el('epm_ov_main_body'), bp = data.base.popups || {};
+        main.querySelectorAll('[data-ov-popup]').forEach(function (c) {
+            var name = c.getAttribute('data-ov-popup'), row = c.closest('.epm-notif-row');
+            var d = (c.checked ? '1' : '0') !== (bp[name] === '0' ? '0' : '1');
+            row.querySelector('.epm-ov-undo').classList.toggle('show', d);
+            row.querySelector('.epm-ov-lbltxt').classList.toggle('epm-ov-diff', d);
+        });
+        var rs = el('epm_ov_ring');
+        if (rs) {
+            var d2 = rs.value !== String(data.base.ringtone == null ? 'Common' : data.base.ringtone);
+            rs.classList.toggle('epm-ov-diff', d2);
+            main.querySelector('[data-ov-undo="ring"]').classList.toggle('show', d2);
+        }
+        main.querySelectorAll('.epm-ov-crow').forEach(customRefresh);
+    }
+    function undoMain(btn) {
+        if (!data || !data.base) return;
+        var what = btn.getAttribute('data-ov-undo') || '';
+        if (what === 'ring') {
+            var rs = el('epm_ov_ring');
+            if (rs) rs.value = String(data.base.ringtone == null ? 'Common' : data.base.ringtone);
+        } else if (what.indexOf('popup:') === 0) {
+            var name = what.substring(6), c = el('epm_ov_main_body').querySelector('[data-ov-popup="' + name + '"]');
+            if (c) c.checked = ((data.base.popups || {})[name] !== '0');
+        }
+        refreshMain();
+        var msg = el('epm_ov_msg');
+        if (msg) { msg.textContent = 'Reset to template default - press Save to apply.'; }
+    }
+
     function render() {
         var pp = [['voice_mail', 'Display Voice Mail Popup'], ['missed_call', 'Display Missed Call Popup'], ['forward_call', 'Display Forward Call Popup'], ['text_message', 'Display Text Message Popup']];
         var h = '<div class="epm-ov-h">Notifications</div><div class="epm-notif-list">';
         pp.forEach(function (p) {
-            h += '<div class="epm-notif-row"><span>' + p[1] + '</span><label class="switch" style="margin:0;">' +
+            h += '<div class="epm-notif-row"><span class="epm-ov-lbl">' + undoBtn('data-ov-undo="popup:' + p[0] + '" onclick="epmOv.undoMain(this)"') + '<span class="epm-ov-lbltxt">' + p[1] + '</span></span><label class="switch" style="margin:0;">' +
                  '<input type="checkbox" data-ov-popup="' + p[0] + '"' + (data.popups[p[0]] === '0' ? '' : ' checked') + '><span class="slider"></span></label></div>';
         });
         h += '</div><div class="epm-ov-h">Keys</div><div class="epm-ov-btnrow">' +
              '<button type="button" class="gen-btn" onclick="openEpmKeyModal(\'epmOvLine\')">Line Keys</button>' +
              (data.memkeys.length ? '<button type="button" class="gen-btn" onclick="openEpmKeyModal(\'epmOvMem\')">Memory Keys</button>' : '') +
              (data.prog.length ? '<button type="button" class="gen-btn" onclick="openEpmKeyModal(\'epmOvProg\')">Programmable Keys</button>' : '') +
-             '</div><div class="epm-ov-h">Default Account Ringtone</div><select class="epm-ov-sel" id="epm_ov_ring">';
-        data.ringtones.builtin.forEach(function (r) { h += '<option value="' + esc(r[0]) + '"' + (r[0] === data.ringtone ? ' selected' : '') + '>' + esc(r[1]) + '</option>'; });
+             '</div><div class="epm-ov-h">Default Account Ringtone</div><div class="epm-ov-ringrow">' + undoBtn('data-ov-undo="ring" onclick="epmOv.undoMain(this)"') + '<select class="epm-ov-sel" id="epm_ov_ring">';
+        var known = {};
+        data.ringtones.builtin.forEach(function (r) { known[r[0]] = 1; h += '<option value="' + esc(r[0]) + '">' + esc(r[1]) + '</option>'; });
         if (data.ringtones.custom.length) {
             h += '<optgroup label="Custom ringtones">';
-            data.ringtones.custom.forEach(function (f) { h += '<option value="' + esc(f) + '"' + (f === data.ringtone ? ' selected' : '') + '>' + esc(f) + '</option>'; });
+            data.ringtones.custom.forEach(function (f) { known[f] = 1; h += '<option value="' + esc(f) + '">' + esc(f) + '</option>'; });
             h += '</optgroup>';
         }
-        h += '</select><div class="epm-ov-h">Custom Key / Value Additions</div>' +
-             '<textarea class="epm-ov-ta" id="epm_ov_custom" spellcheck="false" placeholder="key = value (one per line)">' + esc(data.custom) + '</textarea>';
+        // A ringtone value that is not in either list (e.g. a numeric index) still needs an option,
+        // otherwise the select would silently show the first entry and the undo could not restore it.
+        [data.ringtone, data.base && data.base.ringtone].forEach(function (v) {
+            if (v != null && v !== '' && !known[v]) { known[v] = 1; h += '<option value="' + esc(v) + '">' + esc(v) + '</option>'; }
+        });
+        h += '</select></div><div class="epm-ov-h">Custom Key / Value Additions</div>' +
+             '<div class="epm-ov-note">Grey lines come from the template. A changed or added line is an override and shows in red.</div>' +
+             '<div id="epm_ov_custom_list">' + customRowsHtml() + '</div>' +
+             '<div class="epm-ov-btnrow"><button type="button" class="gen-btn" onclick="epmOv.customAdd()">Add Line</button></div>';
         el('epm_ov_main_body').innerHTML = h;
         el('epm_ov_line_body').innerHTML = keyRows(data.linekeys, 'linekey', true);
         el('epm_ov_mem_body').innerHTML = data.memkeys.length ? keyRows(data.memkeys, 'memorykey', false) : '<div style="padding:16px; font-size:13px; opacity:.8;">This phone has no memory keys: it has no built-in ones and its template has no expansion module.</div>';
         el('epm_ov_prog_body').innerHTML = progRows();
         el('epm_ov_prog_body').querySelectorAll('select[data-f="type"]').forEach(progType);
+        el('epm_ov_ring').value = data.ringtone;
+        bindUndo();
+        refreshAllUndo();
+        refreshMain();
+    }
+
+    function undoSlot() {
+        return '<button type="button" class="epm-ov-undo" title="Reset to template default" tabindex="-1" onclick="epmOv.resetRow(this)"><i class="fa fa-undo" aria-hidden="true"></i></button>';
+    }
+
+    var BODY_IDS = { line: 'epm_ov_line_body', mem: 'epm_ov_mem_body', prog: 'epm_ov_prog_body' };
+    function kindOf(body) {
+        for (var k in BODY_IDS) { if (BODY_IDS[k] === body.id) return k; }
+        return null;
+    }
+    function baseRows(kind) {
+        if (!data || !data.base) return null;
+        return (kind === 'line') ? data.base.linekeys : (kind === 'mem') ? data.base.memkeys : data.base.prog;
+    }
+    function baseFor(kind, row) {
+        var rows = baseRows(kind), idx = parseInt(row.getAttribute('data-idx'), 10);
+        if (!rows) return null;
+        if (kind !== 'prog') return rows[idx - 1] || null;
+        for (var n = 0; n < rows.length; n++) { if (parseInt(rows[n].id, 10) === idx) return rows[n]; }
+        return null;
+    }
+    function ctl(row, f) { return row.querySelector('[data-f="' + f + '"]'); }
+    function cv(row, f) { var c = ctl(row, f); return c ? String(c.value).trim() : ''; }
+
+    // Which fields of this row differ from what the template gives it? Programmable keys only
+    // compare the fields their selected type actually uses (the rule the server applies on save).
+    function rowDiffFields(kind, row) {
+        var b = baseFor(kind, row), out = [];
+        if (!b) return out;
+        var fields;
+        if (kind === 'prog') {
+            if (cv(row, 'type') !== String(b.type)) out.push('type');
+            var t = parseInt(cv(row, 'type'), 10), used = data.progFields[t] || [];
+            fields = used.filter(function (f) { return f === 'line' || f === 'value' || f === 'hist'; });
+            if (t !== 0 && ctl(row, 'label')) fields.push('label');
+        } else {
+            fields = ['type', 'value', 'label', 'pickup', 'line'];
+        }
+        fields.forEach(function (f) {
+            var c = ctl(row, f);
+            if (!c || c.disabled || f === 'type' && kind === 'prog') return;
+            var bv = String(b[f] == null ? '' : b[f]).trim();
+            if (f === 'hist') bv = (bv === '1') ? '1' : '0';
+            if (cv(row, f) !== bv) out.push(f);
+        });
+        return out;
+    }
+
+    function refreshUndo(body) {
+        var kind = kindOf(body);
+        if (!kind) return;
+        body.querySelectorAll('.epm-ov-row').forEach(function (r) {
+            var d = rowDiffFields(kind, r);
+            r.querySelectorAll('[data-f]').forEach(function (c) { c.classList.remove('epm-ov-diff'); });
+            d.forEach(function (f) { var c = ctl(r, f); if (c) c.classList.add('epm-ov-diff'); });
+            r.classList.toggle('epm-ov-changed', d.length > 0);
+        });
+    }
+    function refreshAllUndo() {
+        Object.keys(BODY_IDS).forEach(function (k) { var b = el(BODY_IDS[k]); if (b) refreshUndo(b); });
+    }
+    function bindUndo() {
+        var mb = el('epm_ov_main_body');
+        if (mb && !mb.getAttribute('data-undo-bound')) {
+            mb.setAttribute('data-undo-bound', '1');
+            mb.addEventListener('input', refreshMain);
+            mb.addEventListener('change', refreshMain);
+        }
+        Object.keys(BODY_IDS).forEach(function (k) {
+            var b = el(BODY_IDS[k]);
+            if (!b || b.getAttribute('data-undo-bound')) return;
+            b.setAttribute('data-undo-bound', '1');
+            b.addEventListener('input', function () { refreshUndo(b); });
+            b.addEventListener('change', function () { refreshUndo(b); });
+        });
+    }
+
+    // Put the template's own values into one row.
+    function applyBase(kind, row) {
+        var k = baseFor(kind, row);
+        if (!k) return;
+        row.querySelectorAll('[data-f]').forEach(function (c) {
+            if (c.disabled) return;
+            var f = c.getAttribute('data-f');
+            if (f === 'hist') { c.value = (String(k.hist) === '1') ? '1' : '0'; }
+            else if (k[f] !== undefined) { c.value = k[f]; }
+        });
+        if (kind === 'prog') { progType(ctl(row, 'type')); }
+    }
+
+    // Reset every key in one window. Nothing is written until Save / Save & Sync is pressed;
+    // saving then finds no difference from the template and drops this device's overrides.
+    function reset(kind) {
+        var body = el(BODY_IDS[kind]);
+        if (!data || !body || !baseRows(kind)) return;
+        body.querySelectorAll('.epm-ov-row').forEach(function (r) { applyBase(kind, r); });
+        refreshUndo(body);
+        var msg = el('epm_ov_msg');
+        if (msg) { msg.textContent = 'Template defaults restored - press Save to apply.'; }
+    }
+
+    // Reset just one key (the undo arrow beside its number).
+    function resetRow(btn) {
+        var row = btn.closest('.epm-ov-row'), body = row && row.parentNode;
+        var kind = body ? kindOf(body) : null;
+        if (!kind) return;
+        applyBase(kind, row);
+        refreshUndo(body);
+        var msg = el('epm_ov_msg');
+        if (msg) { msg.textContent = 'Key reset to template default - press Save to apply.'; }
     }
 
     function collect(bodyId) {
@@ -2591,6 +2853,8 @@ var epmOv = (function () {
 
     function save(sync) {
         if (!data) return;
+        var cc = collectCustom();
+        if (cc.bad) { el('epm_ov_msg').textContent = 'Custom key "' + cc.bad + '" is not valid (letters, digits, . _ - only).'; return; }
         var popups = {};
         el('epm_ov_main_body').querySelectorAll('[data-ov-popup]').forEach(function (c) { popups[c.getAttribute('data-ov-popup')] = c.checked ? '1' : '0'; });
         var payload = {
@@ -2599,7 +2863,7 @@ var epmOv = (function () {
             linekeys: collect('epm_ov_line_body'),
             memkeys: collect('epm_ov_mem_body'),
             progkeys: collect('epm_ov_prog_body'),
-            custom: el('epm_ov_custom').value
+            custom: cc.text
         };
         el('epm_ov_msg').textContent = 'Saving...';
         var body = 'save_device_overrides=1&mac=' + encodeURIComponent(mac) + '&sync=' + (sync ? '1' : '0') + '&payload=' + encodeURIComponent(JSON.stringify(payload));
@@ -2616,7 +2880,7 @@ var epmOv = (function () {
             .catch(function (e) { el('epm_ov_msg').textContent = 'Save failed: ' + e; });
     }
 
-    return { open: open, save: save, progType: progType };
+    return { open: open, save: save, progType: progType, reset: reset, resetRow: resetRow, undoMain: undoMain, customAdd: customAdd, customUndo: customUndo };
 })();
 </script>
 
@@ -2655,16 +2919,16 @@ var epmOv = (function () {
      onclick="if (event.target === this) closeVpnDisableModal();">
     <div class="gen-modal-content epm-delete-confirm-card" style="width:460px; max-width:96vw; margin:0; padding:0; overflow:hidden; border:1px solid #a9cbb8; box-shadow:0 12px 36px rgba(0,0,0,.28);">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 18px; background:#dcefe3; border-bottom:1px solid #a9cbb8;">
-            <h3 id="epmVpnDisableConfirmTitle" style="margin:0; color:#155b3b; font-size:16px;">Turn off VPN</h3>
+            <h3 id="epmVpnDisableConfirmTitle" style="margin:0; color:#155b3b; font-size:16px;">Disable and Revoke VPN</h3>
             <button type="button" aria-label="Close confirmation" onclick="closeVpnDisableModal()" style="border:0; background:transparent; color:#426653; font-size:22px; line-height:1; cursor:pointer;">&times;</button>
         </div>
         <div style="padding:18px; color:#333;">
-            <p style="margin:0 0 10px;">Turn off OpenVPN for extension <strong id="epmVpnDisableConfirmExt"></strong> (<span id="epmVpnDisableConfirmMac" style="font-family:monospace;"></span>)?</p>
+            <p style="margin:0 0 10px;">Disable and revoke OpenVPN for extension <strong id="epmVpnDisableConfirmExt"></strong> (<span id="epmVpnDisableConfirmMac" style="font-family:monospace;"></span>)?</p>
             <p style="margin:12px 0 0; color:#8a4b08; font-size:12px;">This revokes the phone's VPN certificate and deletes its client package. It will need a newly issued certificate to reconnect.</p>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; background:#f7faf8; border-top:1px solid #e0e9e3;">
             <button id="epmVpnDisableConfirmCancel" type="button" class="gen-btn" style="margin:0; background:#6c757d;" onclick="closeVpnDisableModal()">Cancel</button>
-            <button type="button" class="gen-btn-danger" style="margin:0; padding:9px 16px;" onclick="submitConfirmedVpnDisable()">Turn off VPN</button>
+            <button type="button" class="gen-btn-danger" style="margin:0; padding:9px 16px;" onclick="submitConfirmedVpnDisable()">Delete VPN</button>
         </div>
     </div>
 </div>
@@ -2945,6 +3209,9 @@ var epmOv = (function () {
             <div id="btn_tab_global" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_global') ? 'active' : '' ?>" onclick="switchTab('tab_global')">Global Settings</div>
             <div id="btn_tab_template" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_template') ? 'active' : '' ?>" onclick="switchTab('tab_template')">Template Manager</div>
             <div id="btn_tab_devices" class="gen-tab-btn <?= ($formData['active_tab'] === 'tab_devices') ? 'active' : '' ?>" onclick="switchTab('tab_devices')">Device Manager</div>
+            <?php if (!empty($epm_cockpit['installed'])): ?>
+            <div id="btn_cockpit" class="gen-tab-btn" title="Open Cockpit in a new browser tab (port <?= (int)$epm_cockpit['port'] ?>)" onclick="epmOpenCockpit(<?= (int)$epm_cockpit['port'] ?>, <?= !empty($epm_cockpit['listening']) ? 'true' : 'false' ?>)"><i class="fa fa-plane" aria-hidden="true"></i> Cockpit</div>
+            <?php endif; ?>
         </div>
         
         <?php if ($show_resign_button): ?>
@@ -3096,11 +3363,11 @@ var epmOv = (function () {
                         </div>
                         <div class="epm-template-fields epm-template-two-col">
                             <div>
-                                <label>Server Username (Optional):</label>
+                                <label title="Also set as the login for /PhoneSettings and /tftpboot over HTTP (not TFTP)">Server Username (Optional):</label>
                                 <input name="auto_provision_username" type="text" class="shadow-box gen-full-width" value="<?= htmlspecialchars($formData['auto_provision_username']) ?>">
                             </div>
                             <div>
-                                <label>Server Password (Optional):</label>
+                                <label title="Also set as the login for /PhoneSettings and /tftpboot over HTTP (not TFTP)">Server Password (Optional):</label>
                                 <input name="auto_provision_password" type="text" class="gen-full-width shadow-box" value="<?= htmlspecialchars($formData['auto_provision_password']) ?>">
                             </div>
                         </div>
@@ -3692,7 +3959,7 @@ var epmOv = (function () {
                                 <option value="<?= $k_code ?>" <?= ($current_type == $k_code) ? 'selected' : '' ?>><?= $k_label ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <input type="text" name="linekey_<?= $i ?>_value" Style=" border: none; background: transparent; outline: none;" placeholder="Line Key <?= $i ?> Extension" title="Line Key <?= $i ?>" inputmode="numeric" pattern="[0-9]*" oninput="epmDigitsOnly(this)" value="<?= htmlspecialchars($formData["linekey_{$i}_value"] ?? '') ?>">
+                        <input type="text" name="linekey_<?= $i ?>_value" Style=" border: none; background: transparent; outline: none;" placeholder="Line Key <?= $i ?> Extension" title="Line Key <?= $i ?>" inputmode="tel" pattern="[0-9*#]*" oninput="epmDigitsOnly(this)" value="<?= htmlspecialchars($formData["linekey_{$i}_value"] ?? '') ?>">
                         <input type="text" name="linekey_<?= $i ?>_label" Style=" border: none; background: transparent; outline: none;" placeholder="Label" title="Label" value="<?= htmlspecialchars($formData["linekey_{$i}_label"] ?? '') ?>">
                         <input type="text" name="linekey_<?= $i ?>_pickup" Style=" border: none; background: transparent; outline: none;" placeholder="Pickup (**)" title="Pickup (**)" value="<?= htmlspecialchars($formData["linekey_{$i}_pickup"] ?? '**') ?>">
                         <select Style=" border: none; background: transparent; outline: none;" name="linekey_<?= $i ?>_line">
@@ -3764,7 +4031,7 @@ var epmOv = (function () {
                             <option value="<?= $mk_code ?>" <?= ($current_mk_type == $mk_code) ? 'selected' : '' ?>><?= $mk_label ?></option>
                         <?php endforeach; ?>
                     </select>
-                    <input type="text" Style=" border: none; background: transparent; outline: none;" name="memkey_<?= $i ?>_value" placeholder="Memory Key <?= $i ?> Extension" title="Memory Key <?= $i ?> Extension" inputmode="numeric" pattern="[0-9]*" oninput="epmDigitsOnly(this)" value="<?= htmlspecialchars($formData["memkey_{$i}_value"] ?? '') ?>">
+                    <input type="text" Style=" border: none; background: transparent; outline: none;" name="memkey_<?= $i ?>_value" placeholder="Memory Key <?= $i ?> Extension" title="Memory Key <?= $i ?> Extension" inputmode="tel" pattern="[0-9*#]*" oninput="epmDigitsOnly(this)" value="<?= htmlspecialchars($formData["memkey_{$i}_value"] ?? '') ?>">
                     <input type="text" Style=" border: none; background: transparent; outline: none;" name="memkey_<?= $i ?>_label" placeholder="Label" title="Label" value="<?= htmlspecialchars($formData["memkey_{$i}_label"] ?? '') ?>">
                     <input type="text" Style=" border: none; background: transparent; outline: none;" name="memkey_<?= $i ?>_pickup" placeholder="Pickup Value" title="Pickup Value" value="<?= htmlspecialchars($formData["memkey_{$i}_pickup"] ?? '**') ?>">
                     <select Style=" border: none; background: transparent; outline: none;" name="memkey_<?= $i ?>_line">
@@ -4154,9 +4421,9 @@ var epmOv = (function () {
         return document.querySelector('[name="' + name + '"]');
     }
 
-    // ---- Extension fields: digits only (whole numbers) ----------------------
+    // ---- Extension fields: digits plus * and # (feature codes / star codes) --
     function epmDigitsOnly(el) {
-        var cleaned = el.value.replace(/[^0-9]/g, '');
+        var cleaned = el.value.replace(/[^0-9*#]/g, '');
         if (cleaned !== el.value) { el.value = cleaned; }
     }
 
@@ -4233,11 +4500,9 @@ var epmOv = (function () {
             if (av === '' && bv === '') { return 0; }
             if (av === '') { return 1; }
             if (bv === '') { return -1; }
-            if (isNumeric) {
+            if (isNumeric && /^[0-9]+$/.test(av) && /^[0-9]+$/.test(bv)) {
                 var an = parseInt(av, 10);
                 var bn = parseInt(bv, 10);
-                if (isNaN(an)) { an = 0; }
-                if (isNaN(bn)) { bn = 0; }
                 return (mode === 'desc') ? (bn - an) : (an - bn);
             }
             var cmp = av.localeCompare(bv, undefined, { sensitivity: 'base', numeric: true });

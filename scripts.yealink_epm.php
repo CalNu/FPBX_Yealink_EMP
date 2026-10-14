@@ -554,6 +554,39 @@ function yealink_epm_fake_vpn_url($server_ip, $sysadmin_redirect) {
     return "http://" . yealink_epm_apply_redirect_port($server_ip, $sysadmin_redirect) . "/PhoneSettings/fakekeys/null.tar";
 }
 
+// Lines written when a phone's VPN is turned off: openvpn.url points at the empty null.tar so the
+// phone downloads nothing usable and stops retrying, and vpn_enable stays 1 (a 0 only takes
+// effect after a reboot). The lines must always be written explicitly - a phone keeps its last
+// value when a line simply disappears from its cfg.
+function yealink_epm_vpn_off_lines($server_ip, $sysadmin_redirect) {
+    return ["openvpn.url = " . yealink_epm_fake_vpn_url($server_ip, $sysadmin_redirect), "network.vpn_enable = 1"];
+}
+
+// Does this cfg carry an openvpn.url line at all (real tar, null.tar or anything else)? Once a phone
+// has one it is never removed - only replaced by a new tar URL or the null.tar URL - because a phone
+// keeps its last value when the line just disappears from its cfg.
+function yealink_epm_cfg_has_vpn_url($cfg_text) {
+    return (bool)preg_match('/^\s*openvpn\.url\s*=/mi', (string)$cfg_text);
+}
+
+// Replace the VPN lines of a whole cfg. Old openvpn.* / network.vpn_enable lines are dropped and the new
+// ones go in right above the INHERITED TEMPLATE SETTINGS marker (end of file if there is none), i.e. in
+// the device's own section, where a rebuild reads them back. Appending after the template would put
+// them past the point where rebuilds stop reading, and the next rebuild would lose them.
+function yealink_epm_cfg_set_vpn_lines($cfg_text, array $vpn_lines) {
+    $kept = [];
+    foreach (explode("\n", (string)$cfg_text) as $l) {
+        if (!preg_match('/^\s*(openvpn\.|network\.vpn_enable)/i', $l)) { $kept[] = $l; }
+    }
+    $text = implode("\n", $kept);
+    $block = implode("\n", $vpn_lines) . "\n\n";
+    $pos = strpos($text, '##### INHERITED TEMPLATE SETTINGS');
+    if ($pos !== false) {
+        return rtrim(substr($text, 0, $pos)) . "\n" . $block . substr($text, $pos);
+    }
+    return rtrim($text) . "\n" . $block;
+}
+
 // Is TFTP available on this box? 'running' (something listens on UDP 69), 'installed'
 // (server files exist but nothing is listening) or 'missing'.
 function epm_tftp_status() {
@@ -2048,7 +2081,8 @@ function epm_build_memory_keys_block(array $formData, $count, $base_mem, $exp_si
         $lbl = trim((string)($formData["memkey_{$i}_label"] ?? ''));
         $pickup = isset($formData["memkey_{$i}_pickup"]) ? $formData["memkey_{$i}_pickup"] : '**';
         if ($pickup === '') { $pickup = '**'; }
-        if ($val === '' && $lbl === '') { continue; }
+        $is_disabled = (isset($formData["memkey_{$i}_type"]) && trim((string)$formData["memkey_{$i}_type"]) === '0');
+        if ($val === '' && $lbl === '' && !$is_disabled) { continue; }
 
         if (!$has) {
             $out .= "################################################\n";
@@ -2061,6 +2095,13 @@ function epm_build_memory_keys_block(array $formData, $count, $base_mem, $exp_si
         $line_num = !empty($formData["memkey_{$i}_line"]) ? $formData["memkey_{$i}_line"] : '1';
 
         list($prefix, $is_exp) = epm_memkey_prefix($i, $base_mem, $exp_size);
+        if ($is_disabled) {
+            // Disabled key: write type = 0 / line = 0 so any older cfg on the phone is cleared.
+            $out .= "{$prefix}.type = 0\n";
+            $out .= "{$prefix}.line = 0\n";
+            $out .= "{$prefix}.label = %NULL%\n\n";
+            continue;
+        }
         $out .= "{$prefix}.line = {$line_num}\n";
         if (!empty($val)) $out .= "{$prefix}.value = {$val}\n";
         if ($pickup !== 'none') {
@@ -2240,10 +2281,24 @@ function epm_ov_key_counts($model, array $spec, $baseline_text, $exp_size, $exp_
 // One line key / memory key: write only the fields that differ from the template.
 function epm_ov_key_diff($prefix, array $new, array $base_map, array $defaults) {
     $out = '';
+    // Override disables a key the template has configured: write type = 0 and line = 0 so
+    // the template's assignment (and any older cfg on the phone) is cleared.
+    if (array_key_exists('type', $new) && epm_ov_clean($new['type']) === '0') {
+        $bt = $base_map["{$prefix}.type"] ?? ($defaults['type'] ?? '');
+        $bl = $base_map["{$prefix}.line"] ?? '';
+        if ($bt !== '0' || ($bl !== '' && $bl !== '0')) {
+            $out .= "{$prefix}.type = 0\n";
+            $out .= "{$prefix}.line = 0\n";
+            $out .= "{$prefix}.label = %NULL%\n";
+        }
+        return $out;
+    }
     $fields = ['line' => 'line', 'value' => 'value', 'pickup' => 'pickup_value', 'type' => 'type', 'label' => 'label'];
     foreach ($fields as $f => $param) {
         if (!array_key_exists($f, $new)) { continue; }
         $n = epm_ov_clean($new[$f]);
+        // line = 0 only ever belongs to a disabled key (handled above); never write it for an enabled one
+        if ($f === 'line' && $n === '0') { continue; }
         $o = $base_map["{$prefix}.{$param}"] ?? ($defaults[$f] ?? '');
         if ($n === $o) { continue; }
         if (($f === 'type' || $f === 'line') && ($n === '' || !ctype_digit($n))) { continue; }
@@ -2835,13 +2890,11 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
         if ($generated_path && file_exists($generated_path)) {
             $cfg_path = $tftp_dir . $mac . ".cfg";
             if (file_exists($cfg_path)) {
-                $lines = @file($cfg_path, FILE_IGNORE_NEW_LINES) ?: [];
-                $clean_lines = array_filter($lines, function($l) {
-                    return !preg_match('/^(openvpn\.|network\.vpn_enable)/i', trim($l));
-                });
-                $clean_lines[] = "openvpn.url = http://" . yealink_epm_apply_redirect_port($saved_global_server_ip, $sysadmin_redirect) . "/PhoneSettings/vpnkeys/{$tar_filename}";
-                $clean_lines[] = "network.vpn_enable = 1";
-                @file_put_contents($cfg_path, implode("\n", $clean_lines) . "\n");
+                $new_cfg = yealink_epm_cfg_set_vpn_lines((string)@file_get_contents($cfg_path), [
+                    "openvpn.url = http://" . yealink_epm_apply_redirect_port($saved_global_server_ip, $sysadmin_redirect) . "/PhoneSettings/vpnkeys/{$tar_filename}",
+                    "network.vpn_enable = 1"
+                ]);
+                @file_put_contents($cfg_path, $new_cfg);
                 @chown($cfg_path, 'asterisk');
             }
             sendSipNotify($ext, 'yealink-check-cfg', '', $admin_pass);
@@ -2899,15 +2952,9 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
 
         $cfg_path = $tftp_dir . $mac . ".cfg";
         if (file_exists($cfg_path)) {
-            $lines = @file($cfg_path, FILE_IGNORE_NEW_LINES) ?: [];
-            $clean_lines = array_filter($lines, function($l) {
-                return !preg_match('/^(openvpn\.|network\.vpn_enable)/i', trim($l));
-            });
-            // vpn_enable stays 1: the phone keeps the VPN feature on, fetches the empty tar and goes quiet
-            // without a reboot (a 0 here would only take effect after one).
-            $clean_lines[] = "openvpn.url = " . yealink_epm_fake_vpn_url($saved_global_server_ip, $sysadmin_redirect);
-            $clean_lines[] = "network.vpn_enable = 1";
-            @file_put_contents($cfg_path, implode("\n", $clean_lines) . "\n");
+            // Point the phone at the empty null.tar; vpn_enable stays 1 (a 0 here would only take effect after a reboot).
+            $new_cfg = yealink_epm_cfg_set_vpn_lines((string)@file_get_contents($cfg_path), yealink_epm_vpn_off_lines($saved_global_server_ip, $sysadmin_redirect));
+            @file_put_contents($cfg_path, $new_cfg);
             @chown($cfg_path, 'asterisk');
         }
 
@@ -3349,6 +3396,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'add_scanned_device') {
                 $vpn_url = "http://" . yealink_epm_apply_redirect_port($saved_global_server_ip, $sysadmin_redirect) . "/PhoneSettings/vpnkeys/{$scanned_mac}_{$scanned_ext}_ovpn.tar";
                 $cfg_body .= "openvpn.url = {$vpn_url}\n";
                 $cfg_body .= "network.vpn_enable = 1\n\n";
+            } elseif (yealink_epm_cfg_has_vpn_url(@file_get_contents($tftp_dir . "{$scanned_mac}.cfg"))) {
+                // Re-adding a phone that already had an openvpn.url: never drop it, point it at null.tar.
+                $cfg_body .= implode("\n", yealink_epm_vpn_off_lines($saved_global_server_ip, $sysadmin_redirect)) . "\n\n";
             }
         }
 
@@ -3864,12 +3914,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
         $pickup = isset($formData["linekey_{$i}_pickup"]) ? $formData["linekey_{$i}_pickup"] : '**';
         if ($pickup === '') { $pickup = '**'; }
 
-        if (!empty($val) || !empty($lbl) || ($pickup !== 'none' && !empty($pickup))) {
+        $lk_disabled = (trim((string)$type) === '0');
+        if ($lk_disabled || !empty($val) || !empty($lbl) || ($pickup !== 'none' && !empty($pickup))) {
             if (!$has_linekeys) {
                 $generated_template_cfg .= "################################################\n";
                 $generated_template_cfg .= "##         Line Keys                            ##\n";
                 $generated_template_cfg .= "################################################\n\n";
                 $has_linekeys = true;
+            }
+            if ($lk_disabled) {
+                // Disabled key: write type = 0 / line = 0 so any older cfg on the phone is cleared.
+                $generated_template_cfg .= "linekey.{$i}.type = 0\n";
+                $generated_template_cfg .= "linekey.{$i}.line = 0\n";
+                $generated_template_cfg .= "linekey.{$i}.label = %NULL%\n\n";
+                continue;
             }
             $generated_template_cfg .= "linekey.{$i}.line = {$line_num}\n";
             if (!empty($val)) $generated_template_cfg .= "linekey.{$i}.value = {$val}\n";
@@ -4327,10 +4385,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
                         $vpn_url = "http://" . yealink_epm_apply_redirect_port($saved_global_server_ip, $sysadmin_redirect) . "/PhoneSettings/vpnkeys/{$clean_mac}_{$new_ext}_ovpn.tar";
                         $account_block[] = "openvpn.url = {$vpn_url}";
                         $account_block[] = "network.vpn_enable = 1";
-                    } elseif (strpos($base_content, '/PhoneSettings/fakekeys/null.tar') !== false) {
-                        // VPN was turned off earlier: keep pointing the phone at the empty tar.
-                        $account_block[] = "openvpn.url = " . yealink_epm_fake_vpn_url($saved_global_server_ip, $sysadmin_redirect);
-                        $account_block[] = "network.vpn_enable = 1";
+                    } elseif (yealink_epm_cfg_has_vpn_url($file_content)) {
+                        // The cfg had an openvpn.url and its tar is gone (VPN turned off): never drop it, point it at null.tar.
+                        foreach (yealink_epm_vpn_off_lines($saved_global_server_ip, $sysadmin_redirect) as $off_line) {
+                            $account_block[] = $off_line;
+                        }
                     }
 
                     $blk_model = !empty($new_tpl) ? epm_template_phone_model($template_dir . $new_tpl) : '';
@@ -4338,6 +4397,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
                     $sip_idx = array_search("@@EPM_SIP_SERVER@@", $account_block, true);
                     array_splice($account_block, $sip_idx, 1, epm_sip_server_lines($blk_model, $saved_global_server_ip, $default_sip_port));
                     array_splice($updated_lines, 3, 0, $account_block);
+                } elseif (yealink_epm_cfg_has_vpn_url($file_content)) {
+                    // No extension to rebuild the account block from: keep the VPN lines exactly as they are.
+                    $keep_vpn = [];
+                    foreach (explode("\n", $file_content) as $kl) {
+                        if (preg_match('/^\s*(openvpn\.|network\.vpn_enable)/i', $kl)) { $keep_vpn[] = trim($kl); }
+                    }
+                    array_splice($updated_lines, 3, 0, array_values(array_unique($keep_vpn)));
                 }
 
                 $final_cfg = implode("\n", $updated_lines);

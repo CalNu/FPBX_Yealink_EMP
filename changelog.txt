@@ -1,3 +1,14 @@
+1.1.13
+• Changed: a disabled Line/Memory Key (template or device override) also writes "label = %NULL%" next to type = 0 and line = 0, so a stale label is cleared from the phone too. type and line stay at 0 (a %NULL% type causes syntax errors in the Asterisk log).
+• Changed: a Line Key or Memory Key whose type is set to Disabled (0) now writes only "<key>.type = 0" and "<key>.line = 0" (linekey.X, memorykey.X, or expansion_module.M.key.K for expansion keys), even when its Extension and Label are empty. This overwrites any older cfg still on the phone for that key, so a previously assigned key is properly cleared. Value, label and pickup are no longer written for a disabled key. Line key 1 (the account line) is unaffected.
+• Changed: in a phone's Line/Memory Key overrides, setting a key to Disabled (0) now writes both "type = 0" and "line = 0" for that key in the device's cfg, overriding whatever the template assigned. Re-enabling it removes those lines so the template's assignment applies again.
+
+
+1.1.12
+• Fixed: once a phone's cfg has an openvpn.url line it is never deleted again - it is only replaced by a new key-package URL (VPN on) or by the empty null.tar URL (VPN off), together with network.vpn_enable = 1. Cause: turning VPN on or off appended its lines to the very end of the cfg, after the inherited template section, but Rebuild (selected/all/filtered/single), Edit extension and re-adding a device only read the part above that section, so the next rebuild silently dropped the lines and the phone fell back to its old VPN URL, retrying and raising alerts. The lines are now written in the device's own section, and every rebuild keeps them whenever the cfg had an openvpn.url (pointing it at null.tar if the key file no longer exists).
+
+
+
 1.1.11
 • Changed: the Extension field on Line Keys and Memory Keys now accepts * and # as well as digits (e.g. *97, *8, #1). Phones show the telephone keypad on mobile browsers so both symbols are available. Sorting by Extension still orders plain numbers numerically; entries containing * or # are ordered after comparing as text.
 • Added: "Reset to Template Defaults" button in the per-device Line Keys, Memory Keys and Programmable Keys windows. It puts the template's own values back into that window (type, value/extension, label, pickup, line and history); press Save or Save & Sync in Device Overrides to apply it. Saving then finds no difference from the template, so that device's overrides for those keys are removed from its .cfg. Line key 1 (the account line) is never touched.

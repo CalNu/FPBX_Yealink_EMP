@@ -967,15 +967,20 @@ if (!function_exists('epmReadProtectedFile')) {
 // in a static so repeated calls (device list + debug endpoint, say) don't
 // re-stat the filesystem every time.
 if (!function_exists('epmFindOvpnCtl')) {
-    function epmFindOvpnCtl() {
-        static $path = null;
-        if ($path !== null) { return $path ?: false; }
+    function epmFindOvpnCtl($instance = 'legacy') {
+        static $cache = [];
+        $instance = ($instance === 'modern') ? 'modern' : 'legacy';
+        if (isset($cache[$instance])) { return $cache[$instance] ?: false; }
 
         global $amp_conf;
         $amp_web_root = rtrim(($amp_conf['AMPWEBROOT'] ?? null) ?: '/var/www/html', '/');
-        $candidate = "{$amp_web_root}/admin/modules/ovpn_mgr/scripts/ovpnctl";
-        $path = is_executable($candidate) ? $candidate : '';
-        return $path ?: false;
+        // ovpn_mgr 2.73+: the modern daemon is driven through a root-owned shim installed
+        // outside the module directory by setup-root.sh (same sudoers rule as ovpnctl).
+        $candidate = ($instance === 'modern')
+            ? '/usr/local/sbin/ovpn_mgr-ctl-modern'
+            : "{$amp_web_root}/admin/modules/ovpn_mgr/scripts/ovpnctl";
+        $cache[$instance] = is_executable($candidate) ? $candidate : '';
+        return $cache[$instance] ?: false;
     }
 }
 
@@ -983,9 +988,10 @@ if (!function_exists('epmFindOvpnCtl')) {
 // the whole script, no per-subcommand restriction). -n so a broken/missing
 // sudo rule fails fast with an error instead of hanging the page on a
 // password prompt that will never come. Returns ['ok' => bool, 'out' => string].
+// $instance picks the legacy or modern OpenVPN daemon.
 if (!function_exists('epmRunOvpnCtl')) {
-    function epmRunOvpnCtl($subcommand) {
-        $bin = epmFindOvpnCtl();
+    function epmRunOvpnCtl($subcommand, $instance = 'legacy') {
+        $bin = epmFindOvpnCtl($instance);
         if ($bin === false) { return ['ok' => false, 'out' => '']; }
 
         $cmd = implode(' ', array_map('escapeshellarg', ['sudo', '-n', $bin, $subcommand]));
@@ -998,6 +1004,25 @@ if (!function_exists('epmRunOvpnCtl')) {
         fclose($pipes[2]);
         $code = proc_close($proc);
         return ['ok' => ($code === 0), 'out' => $out];
+    }
+}
+
+// Which OpenVPN instance a phone model must use.
+//   legacy: RSA-1024 / SHA-1 / AES-CBC, for the old OpenVPN clients in the T19-T29 generation.
+//   modern: RSA-2048 / SHA-256 / AES-GCM / TLS 1.2+, for every newer T-series phone.
+// The cut-off is the model number in the name (SIP-T28P, T46S, T54W ...): 29 and below is legacy.
+// A model that can't be read (blank, "Yealink", "manual", VP/W/CP series ...) stays on legacy,
+// which every phone can connect to, so an unknown device never ends up unable to connect.
+// EPM_OVPN_LEGACY_MAX_T_SERIES is the highest T-number that stays on legacy. Raise it to 39 to keep
+// the T3x series on legacy too (e.g. if a T3x turns out not to connect to the modern instance).
+if (!defined('EPM_OVPN_LEGACY_MAX_T_SERIES')) { define('EPM_OVPN_LEGACY_MAX_T_SERIES', 29); }
+if (!function_exists('epm_ovpn_instance_for_model')) {
+    function epm_ovpn_instance_for_model($model) {
+        $m = strtoupper(trim((string)$model));
+        if (!preg_match('/(?:^|[^A-Z0-9])T(\d{2})[A-Z]?\b/', $m, $mm)) {
+            return 'legacy';
+        }
+        return ((int)$mm[1] <= EPM_OVPN_LEGACY_MAX_T_SERIES) ? 'legacy' : 'modern';
     }
 }
 
@@ -1037,18 +1062,22 @@ if (!function_exists('epmGetOpenVpnClientMap')) {
         $clients = [];
         $status_output = '';
 
-        $ovpnctl_result = epmRunOvpnCtl('status');
-        if ($ovpnctl_result['ok'] && trim($ovpnctl_result['out']) !== '') {
-            $status_output = $ovpnctl_result['out'];
+        // Both daemons: a phone on either instance counts as connected.
+        foreach (['legacy', 'modern'] as $epm_inst) {
+            $ovpnctl_result = epmRunOvpnCtl('status', $epm_inst);
+            if ($ovpnctl_result['ok'] && trim($ovpnctl_result['out']) !== '') {
+                $status_output .= $ovpnctl_result['out'] . "\n";
+            }
         }
 
         if (trim($status_output) === '') {
             foreach (['/var/log/openvpn/openvpn-status.log',
                       '/var/www/html/PhoneSettings/openvpn/logs/openvpn-status.log',
+                      '/var/www/html/PhoneSettings/openvpn/logs-legacy/openvpn-status.log',
+                      '/var/www/html/PhoneSettings/openvpn/logs-modern/openvpn-modern-status.log',
                       '/var/log/openvpn/status.log'] as $status_file) {
                 if (file_exists($status_file)) {
-                    $status_output = epmReadProtectedFile($status_file);
-                    if (trim($status_output) !== '') { break; }
+                    $status_output .= epmReadProtectedFile($status_file) . "\n";
                 }
             }
         }
@@ -1159,6 +1188,42 @@ if (!function_exists('epmGetProvisioningLogMacMap')) {
         }
 
         return ['map' => $map, 'files' => $read];
+    }
+}
+
+// Unicast-probes every host in the target so ARP/neighbour entries exist for phones that
+// don't answer broadcast pings. Capped at /22 (1022 hosts); larger targets only get the
+// broadcast ping. Runs 64 probes at a time and returns after ~4s at most.
+if (!function_exists('epmSweepSubnetForArp')) {
+    function epmSweepSubnetForArp($target) {
+        @exec('ping -c 1 -W 1 -b ' . escapeshellarg($target['broadcast']) . ' > /dev/null 2>&1 &');
+        $hosts = ($target['bits'] >= 22 && $target['bits'] <= 30) ? (1 << (32 - $target['bits'])) - 2 : 0;
+        if ($hosts <= 0) { usleep(300000); return; }
+
+        // One tiny non-blocking UDP datagram per host (discard port). Sending forces the kernel to
+        // ARP for the address; live hosts are in the table within milliseconds. No processes are
+        // spawned and nothing waits for dead addresses, so the whole sweep takes ~1 second.
+        $socks = [];
+        for ($i = 1; $i <= $hosts; $i++) {
+            $s = @stream_socket_client('udp://' . long2ip($target['net'] + $i) . ':9', $en, $es, 0);
+            if ($s) { stream_set_blocking($s, false); @fwrite($s, "\0"); $socks[] = $s; }
+        }
+        usleep(1200000);
+        foreach ($socks as $s) { @fclose($s); }
+    }
+}
+
+// Pings many addresses at once and returns those that answer. Used for the routed/log method so
+// dead hosts cost one shared ~1s wait rather than 1s each.
+if (!function_exists('epmHostsRespond')) {
+    function epmHostsRespond(array $ips) {
+        $ips = array_values(array_filter($ips, function ($ip) { return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4); }));
+        if (!$ips) { return []; }
+        $out = [];
+        $cmd = 'printf "%s\n" ' . implode(' ', array_map('escapeshellarg', $ips))
+             . ' | timeout 5 xargs -P 128 -I{} sh -c \'ping -c 1 -W 1 {} > /dev/null 2>&1 && echo {}\'';
+        @exec($cmd, $out);
+        return array_flip(array_map('trim', $out));
     }
 }
 
@@ -2845,7 +2910,37 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
     // wherever PhoneSettings currently resolves to) rather than being
     // hardcoded here, so this always points at the same PKI/data ovpn_mgr's
     // own UI and daemon use.
-    $ovpn_paths = ovpn_mgr_resolve_paths($amp_web_root);
+    //
+    // Which OpenVPN instance serves this phone is decided by its model: T19-T29 use the
+    // legacy server (RSA-1024 / SHA-1 / AES-CBC), every newer model the modern one
+    // (RSA-2048 / SHA-256 / AES-GCM / TLS 1.2+). The model comes from the "# Phone Model:" line
+    // of the phone's cfg (its template's model if the cfg has none).
+    $epm_toggle_cfg = $tftp_dir . $mac . ".cfg";
+    $epm_toggle_model = '';
+    if (is_file($epm_toggle_cfg)) {
+        // A device cfg starts with a placeholder "# Phone Model: Yealink" and carries the real
+        // model (from its inlined template) further down, so read every such line and use the
+        // first one that names a real model - the same rule the device list uses.
+        if (preg_match_all('/^#\s*Phone\s*Model\s*:\s*(.+)$/im', (string)@file_get_contents($epm_toggle_cfg), $mm_all)) {
+            foreach ($mm_all[1] as $cand) {
+                $cand = trim($cand);
+                if ($cand !== '' && strcasecmp($cand, 'Yealink') !== 0) { $epm_toggle_model = $cand; break; }
+            }
+        }
+    }
+    $ovpn_instance = epm_ovpn_instance_for_model($epm_toggle_model);
+
+    // Needs ovpn_mgr 2.73+ (two instances). A modern phone must never silently get a legacy package.
+    $ovpn_paths = ovpn_mgr_resolve_paths($amp_web_root, $ovpn_instance);
+    if ($ovpn_instance === 'modern' && (!is_file($ovpn_paths['serverConf']) || empty($ovpn_paths['instance']) || $ovpn_paths['instance'] !== 'modern')) {
+        if ($enable) {
+            echo json_encode([
+                'status'  => 'error',
+                'message' => "This phone ({$epm_toggle_model}) needs the modern OpenVPN server, but ovpn_mgr has no modern instance yet. Update ovpn_mgr to 2.73 or newer and open its page once so the modern instance is created."
+            ]);
+            exit;
+        }
+    }
     $settings = getActiveServerSettings($ovpn_paths['serverConf']);
     $ovpn_host = $settings['ip'];
     $ovpn_port = $settings['port'];
@@ -2931,23 +3026,48 @@ if (isset($_REQUEST['action']) && $_REQUEST['action'] === 'toggle_ovpn_state') {
         // config, so - exactly like ovpn_mgr's own Revoke button - restart
         // only if the config text actually changed, and never if the admin
         // has deliberately stopped the server (.stopped sentinel).
-        if (function_exists('revokeExtension')) {
-            $conf_before_revoke = (string)@file_get_contents($ovpn_paths['serverConf']);
-            revokeExtension($ovpn_paths['pkiDir'], $ovpn_paths['serverConf'], $ovpn_paths['crlFile'], $ovpn_paths['pkgDir'], $ext);
-            $conf_changed = ((string)@file_get_contents($ovpn_paths['serverConf']) !== $conf_before_revoke);
-            if ($conf_changed && !file_exists("{$ovpn_paths['baseDir']}/.stopped")) {
-                stopOpenVpnServer($ovpn_paths['ovpnctl']);
-                startOpenVpnServer($ovpn_paths['ovpnctl'], $ovpn_paths['serverConf'], $ovpn_paths['baseDir'], $ovpn_paths['serverKey']);
+        // Revoke on every instance that holds a certificate for this extension (normally just the
+        // one matching the phone's model, but a phone whose model was changed, or one moved with
+        // ovpn_mgr's Move to Modern / Move to Legacy, can have one on each).
+        $revoke_instances = [];
+        foreach (['legacy', 'modern'] as $try_inst) {
+            $try_paths = ovpn_mgr_resolve_paths($amp_web_root, $try_inst);
+            if (($try_paths['instance'] ?? 'legacy') === $try_inst && is_file("{$try_paths['pkiDir']}/issued/{$ext}.crt")) {
+                $revoke_instances[] = $try_paths;
             }
-        } else {
-            // Older ovpn_mgr without a separate revokeExtension(): fall back to
-            // the combined helper (this one restarts the daemon).
-            revokeExtensionAndRestart($ovpn_paths, $ext);
         }
-        // Newer ovpn_mgr's revokeExtension() already drops the live tunnel; for
-        // older builds do it here so the revoked phone doesn't stay connected.
-        if (function_exists('ovpn_mgr_kill_extension_sessions')) {
-            ovpn_mgr_kill_extension_sessions($ext);
+        if (!$revoke_instances) { $revoke_instances[] = $ovpn_paths; }   // nothing issued: still clear the package
+
+        foreach ($revoke_instances as $rp) {
+            if (function_exists('revokeExtension')) {
+                // revokeExtension() is ovpn_mgr's own revocation: it revokes the cert against that
+                // instance's CA, regenerates crl.pem, deletes the cert/key and any built packages for
+                // this extension and drops the live tunnel. OpenVPN re-reads crl-verify's target file on
+                // every new connection by itself, so the revocation needs no daemon restart (restarting
+                // drops every connected phone). The only restart ever needed is the one-time addition
+                // of the crl-verify directive to the server config, so - exactly like ovpn_mgr's own
+                // Revoke button - restart only if the config text actually changed, and never if the
+                // admin has deliberately stopped that server (its .stopped sentinel).
+                $stopped_flag = function_exists('ovpnStateFile')
+                    ? ovpnStateFile($rp['baseDir'], $rp['instance'] ?? 'legacy', '.stopped')
+                    : "{$rp['baseDir']}/.stopped";
+                $conf_before_revoke = (string)@file_get_contents($rp['serverConf']);
+                revokeExtension($rp['pkiDir'], $rp['serverConf'], $rp['crlFile'], $rp['pkgDir'], $ext);
+                $conf_changed = ((string)@file_get_contents($rp['serverConf']) !== $conf_before_revoke);
+                if ($conf_changed && !file_exists($stopped_flag)) {
+                    stopOpenVpnServer($rp['ovpnctl']);
+                    startOpenVpnServer($rp['ovpnctl'], $rp['serverConf'], $rp['baseDir'], $rp['serverKey']);
+                }
+            } else {
+                // Older ovpn_mgr without a separate revokeExtension(): fall back to
+                // the combined helper (this one restarts the daemon).
+                revokeExtensionAndRestart($rp, $ext);
+            }
+            // Newer ovpn_mgr's revokeExtension() already drops the live tunnel; for
+            // older builds do it here so the revoked phone doesn't stay connected.
+            if (function_exists('ovpn_mgr_kill_extension_sessions')) {
+                ovpn_mgr_kill_extension_sessions($ext, $rp['instance'] ?? 'legacy');
+            }
         }
 
         $cfg_path = $tftp_dir . $mac . ".cfg";
@@ -3112,8 +3232,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'scan_network') {
     $target = epmParseScanTarget($subnet_input, $detected_host);
 
     // ---- Method 1: local L2 segment (broadcast ping -> ARP table) ------------
-    exec('ping -c 2 -b ' . escapeshellarg($target['broadcast']) . ' > /dev/null 2>&1 &');
-    usleep(200000);
+    // Phones commonly ignore broadcast pings, so a broadcast alone never puts their MAC in the
+    // ARP table. Probe every host address with a unicast ping (parallel, bounded) so the kernel
+    // resolves each one's MAC, then read the table. A broadcast ping is still sent as a bonus.
+    epmSweepSubnetForArp($target);
 
     $discovered = [];
     $seen_macs = [];
@@ -3140,18 +3262,23 @@ if (isset($_GET['action']) && $_GET['action'] === 'scan_network') {
 
     $log_result = epmGetProvisioningLogMacMap();
     $log_map = $log_result['map'];
-    $ping_budget = 20;
+
+    $routed_candidates = [];
+    foreach ($log_map as $ip => $mac) {
+        if (!epmIpInTarget($ip, $target) || isset($seen_macs[$mac]) || in_array($mac, $existing_macs, true)) {
+            continue;
+        }
+        if (!isset($vpn_in_scope[$ip])) { $routed_candidates[] = $ip; }
+    }
+    $alive = epmHostsRespond($routed_candidates);   // one parallel batch instead of a ping per host
 
     foreach ($log_map as $ip => $mac) {
         if (!epmIpInTarget($ip, $target) || isset($seen_macs[$mac]) || in_array($mac, $existing_macs, true)) {
             continue;
         }
         $via = isset($vpn_in_scope[$ip]) ? 'openvpn' : 'routed';
-        if ($via === 'routed') {
-            // Not a live OpenVPN client, so make sure the address is actually answering.
-            if ($ping_budget-- <= 0 || !epmHostResponds($ip)) {
-                continue;
-            }
+        if ($via === 'routed' && !isset($alive[$ip])) {
+            continue;   // not a live OpenVPN client and not answering
         }
         $discovered[] = ['ip' => $ip, 'mac' => $mac, 'vendor' => 'Yealink', 'via' => $via];
         $seen_macs[$mac] = true;
@@ -4522,7 +4649,19 @@ if (is_array($existing_templates)) {
 // dots below (epmGetOpenVpnClientMap -> epmDeriveOvpnLookups): ovpnctl
 // status as root, falling back to a direct file read or the management
 // port if that's ever unavailable.
-[$ovpn_connected_exts, $ovpn_connected_macs, $ovpn_connected_ips] = epmDeriveOvpnLookups(epmGetOpenVpnClientMap());
+$ovpn_client_map = epmGetOpenVpnClientMap();   // [virtual_ip => common_name]
+[$ovpn_connected_exts, $ovpn_connected_macs, $ovpn_connected_ips] = epmDeriveOvpnLookups($ovpn_client_map);
+
+// Reverse lookup for phones that are reachable only through the VPN: their MAC
+// never appears in the PBX's ARP table (routed tunnel), so the tunnel's virtual
+// IP is the address to show. Keys: lower-cased common name -> virtual IP.
+$ovpn_cn_to_vip = [];
+foreach ($ovpn_client_map as $epm_vip => $epm_cn) {
+    $epm_cn = strtolower(trim((string)$epm_cn));
+    if ($epm_cn === '') { continue; }
+    $ovpn_cn_to_vip[$epm_cn] = $epm_vip;
+    if (preg_match('/^client[-_]?(\d+)$/', $epm_cn, $epm_m)) { $ovpn_cn_to_vip[$epm_m[1]] = $epm_vip; }
+}
 
 // Load administrator-registered MACs. These are allowed regardless of OUI.
 $registered_manual_macs = [];
@@ -4589,7 +4728,19 @@ if (is_array($existing_files)) {
             $assigned_extensions_map[(string)$ext_num] = true;
         }
 
-        $ip_addr = $arp_table[$file_name_no_ext] ?? 'Unknown / Offline';
+        // 1) LAN phones: ARP table.  2) VPN phones: the tunnel's virtual IP, matched
+        // by certificate CN (MAC, "client-<ext>" or "<ext>").  3) Last resort: the
+        // phone's registered PJSIP contact address if it sits inside the tunnel.
+        $ip_addr = $arp_table[$file_name_no_ext] ?? '';
+        if ($ip_addr === '') {
+            $vpn_ip = $ovpn_cn_to_vip[$file_name_no_ext]
+                ?? (($ext_num !== '') ? ($ovpn_cn_to_vip["client-{$ext_num}"] ?? $ovpn_cn_to_vip[(string)$ext_num] ?? '') : '');
+            if ($vpn_ip === '' && $ext_num !== '' && isset($online_exts[$ext_num])) {
+                $via = preg_replace('/:\d+$/', '', (string)($online_exts[$ext_num]['via'] ?? ''));
+                if ($via !== '' && in_array($via, $ovpn_connected_ips, true)) { $vpn_ip = $via; }
+            }
+            $ip_addr = $vpn_ip !== '' ? $vpn_ip : 'Unknown / Offline';
+        }
 
         $vpn_tar_file = "/var/www/html/PhoneSettings/vpnkeys/{$file_name_no_ext}_{$ext_num}_ovpn.tar";
         $has_vpn = file_exists($vpn_tar_file);
@@ -4604,7 +4755,7 @@ if (is_array($existing_files)) {
                 isset($ovpn_connected_macs[$clean_mac]) || 
                 isset($ovpn_connected_exts[$clean_ext_cn]) || 
                 (!empty($ext_num) && isset($ovpn_connected_exts[$ext_num])) ||
-                (!empty($ext_num) && $pjsip_online && in_array($online_exts[$ext_num]['via'] ?? '', $ovpn_connected_ips))
+                (!empty($ext_num) && $pjsip_online && in_array(preg_replace('/:\d+$/', '', (string)($online_exts[$ext_num]['via'] ?? '')), $ovpn_connected_ips, true))
             ) {
                 $is_vpn_connected = true;
             }

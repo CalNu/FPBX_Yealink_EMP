@@ -1,3 +1,17 @@
+1.1.16
+• Fixed: a phone connected through the VPN showed "Unknown / Offline" in the IP Address column because its MAC never reaches the PBX's ARP table over a routed tunnel. The column now falls back to the phone's OpenVPN virtual (tunnel) IP, matched by certificate CN (MAC, client-<ext> or <ext>), and finally to its registered PJSIP contact address when that lies inside the tunnel. LAN phones still use ARP first.
+• Fixed: the PJSIP-contact VPN check compared the contact address with its port attached, so it could never match a tunnel IP.
+
+1.1.15
+• Changed: the VPN toggle now picks the OpenVPN server by phone model (needs ovpn_mgr 2.73 or newer). T19-T29 phones get a package for the legacy server (RSA-1024 / SHA-1 / AES-CBC); every newer T-series model (T3x, T4x, T5x ...) gets one for the modern server (RSA-2048 / SHA-256 / AES-GCM / TLS 1.2+). The model is read from the phone's cfg (the first "# Phone Model:" line that isn't the "Yealink" placeholder). A model that can't be read (blank, "Yealink", "manual", VP/W/CP series) stays on legacy. The cut-off is EPM_OVPN_LEGACY_MAX_T_SERIES (default 29; set it to 39 to keep the T3x on legacy).
+• Changed: if a modern phone is toggled on but ovpn_mgr has no modern instance, the toggle reports an error instead of building a legacy package.
+• Fixed: turning VPN off revokes the phone's certificate on whichever instance holds it (both, if the extension exists on both) and drops its live tunnel there.
+• Fixed: the green/grey VPN status dot and Scan Subnet only looked at the legacy daemon's connected clients, so a phone connected to the modern server always showed as disconnected. Both daemons are checked now.
+
+1.1.14
+• Fixed: Scan Subnet missed phones that don't answer broadcast pings (e.g. a T48S at 80:5E:0C:...). The scanner now unicast-pings every host in the subnet (up to /22, 64 at a time) before reading the ARP table, instead of one broadcast ping and a 200 ms wait. The probe is a non-blocking UDP datagram per host (no processes, ~1 s total). The routed/log-based method now pings all candidates in one parallel batch (no 20-host cap, no 1 s per dead host).
+
+
 1.1.13
 • Changed: a disabled Line/Memory Key (template or device override) also writes "label = %NULL%" next to type = 0 and line = 0, so a stale label is cleared from the phone too. type and line stay at 0 (a %NULL% type causes syntax errors in the Asterisk log).
 • Changed: a Line Key or Memory Key whose type is set to Disabled (0) now writes only "<key>.type = 0" and "<key>.line = 0" (linekey.X, memorykey.X, or expansion_module.M.key.K for expansion keys), even when its Extension and Label are empty. This overwrites any older cfg still on the phone for that key, so a previously assigned key is properly cleared. Value, label and pickup are no longer written for a disabled key. Line key 1 (the account line) is unaffected.

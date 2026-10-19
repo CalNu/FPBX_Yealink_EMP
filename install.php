@@ -214,7 +214,20 @@ if (!function_exists('deploy_module_symlink')) {
             return true;
         }
 
-        out("ERROR: Failed to create symlink " . $target . " -> " . $source . " (check filesystem permissions for the web server user).");
+        // The asterisk user may not own the parent folder (e.g. the module was unpacked as root).
+        // Try passwordless sudo before giving up.
+        $s_out = []; $s_ret = 1;
+        @exec('sudo -n ln -sfn ' . escapeshellarg($source) . ' ' . escapeshellarg($target)
+            . ' && sudo -n chown -h asterisk:asterisk ' . escapeshellarg($target) . ' 2>&1', $s_out, $s_ret);
+        clearstatcache(true, $target);
+        if ($s_ret === 0 && is_link($target)) {
+            return true;
+        }
+
+        $err = error_get_last();
+        out("ERROR: Failed to create symlink " . $target . " -> " . $source
+          . ($err ? " (" . $err['message'] . ")" : "")
+          . ". Run as root: ln -sfn " . $source . " " . $target . "  (or: bash " . dirname(__FILE__) . "/scripts/install_tftp.sh)");
         return false;
     }
 }
@@ -245,9 +258,8 @@ if ($tftp_root_ok) {
 // Inside the module dir
 deploy_module_symlink($tftp_root, $module_root . '/tftpboot');                     // yealink_epm/tftpboot       -> /tftpboot
 
-if (file_exists($amp_conf['AMPWEBROOT'] . '/admin/modules/ovpn_mgr')) {
-    deploy_module_symlink($amp_conf['AMPWEBROOT'] . '/admin/modules/ovpn_mgr', $module_root . '/ovpn_mgr');
-}
+// Created even if ovpn_mgr is not installed yet (it resolves once that module is installed).
+deploy_module_symlink($amp_conf['AMPWEBROOT'] . '/admin/modules/ovpn_mgr', $module_root . '/ovpn_mgr');
 
 // Convenience aliases some Yealink firmwares/tools expect at these paths.
 // (If something real already lives here, it is left alone with a warning.)

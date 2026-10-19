@@ -76,6 +76,8 @@ make_link "$MODULE_DIR"  "$TFTP_ROOT/yealink_epm"
 make_link "$TFTP_ROOT"   "$MODULE_DIR/tftpboot"
 make_link "$TFTP_ROOT"   "$WEBROOT/tftpboot"
 make_link "$TFTP_ROOT"   "$WEBROOT/tftp"
+# ovpn_mgr link inside the module folder (created even if ovpn_mgr is not installed yet)
+make_link "$WEBROOT/admin/modules/ovpn_mgr" "$MODULE_DIR/ovpn_mgr"
 
 # ---------------------------------------------------------------------------
 # 0b. Pre-authorize the HTTP shift port (root helper + narrow sudo rule). Done here, while we

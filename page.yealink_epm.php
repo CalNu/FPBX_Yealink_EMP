@@ -689,6 +689,24 @@ function epmApplyProvPort(port) {
         border-bottom: 1px solid #65a783;
     }
 
+    /* Tabs styled to match the OpenVPN Manager module's tabs */
+    .gen-tab-bar { border-bottom: 1px solid #72a78b !important; padding-top: 10px; padding-bottom: 0 !important; }
+    .gen-tab-bar > div:first-child { align-items: flex-end; gap: 2px; padding-left: 6px; }
+    .gen-tab-btn {
+        display: block; margin: 0 !important; padding: 8px 20px !important;
+        font-size: 14px; line-height: 15px; font-weight: bold !important;
+        color: #1b5a59 !important; background: #fff !important;
+        border: 1px solid #72a78b !important; border-bottom: none !important;
+        border-radius: 6px 6px 0 0 !important; text-decoration: none; outline: none;
+    }
+    .gen-tab-btn:hover { color: #1b5a59 !important; background: #fff !important; }
+    .gen-tab-btn.active, .gen-tab-btn.active:hover {
+        color: #1b5a59 !important; border-color: #72a78b !important;
+        background: linear-gradient(to bottom, #d9e5df 0%, #ffffff 100%) !important;
+        padding-bottom: 9px !important; margin-bottom: -1px !important; cursor: default;
+    }
+    #btn_cockpit, #btn_cockpit:hover { border-radius: 6px 6px 0 0 !important; }
+
 </style>
 
 <!-- ============================================================================ -->

@@ -1,0 +1,1070 @@
+[
+[
+"account.{n}.100rel_enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.alert_info_tone",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.alert_info_url_enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.always_fwd.enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.always_fwd.off_code",
+""
+],
+[
+"account.{n}.always_fwd.on_code",
+""
+],
+[
+"account.{n}.always_fwd.target",
+""
+],
+[
+"account.{n}.anonymous_call",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.anonymous_call_offcode",
+""
+],
+[
+"account.{n}.anonymous_call_oncode",
+""
+],
+[
+"account.{n}.auth_name",
+""
+],
+[
+"account.{n}.auto_answer",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.blf_list_uri",
+""
+],
+[
+"account.{n}.busy_fwd.enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.busy_fwd.off_code",
+""
+],
+[
+"account.{n}.busy_fwd.on_code",
+""
+],
+[
+"account.{n}.busy_fwd.target",
+""
+],
+[
+"account.{n}.cid_source",
+""
+],
+[
+"account.{n}.codec.g722.enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.codec.g729.enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.codec.pcma.enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.codec.pcmu.enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.display_name",
+""
+],
+[
+"account.{n}.dnd.enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.dnd.off_code",
+""
+],
+[
+"account.{n}.dnd.on_code",
+""
+],
+[
+"account.{n}.dtmf.dtmf_payload",
+"96-127"
+],
+[
+"account.{n}.dtmf.type",
+"0 = inband, 1 = RFC2833, 2 = SIP INFO, 3 = RFC2833 + SIP INFO"
+],
+[
+"account.{n}.enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.label",
+""
+],
+[
+"account.{n}.missed_calllog",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.nat.udp_update_enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.nat.udp_update_time",
+"seconds"
+],
+[
+"account.{n}.outbound_proxy.{n}.address",
+""
+],
+[
+"account.{n}.outbound_proxy.{n}.port",
+""
+],
+[
+"account.{n}.outbound_proxy_enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.password",
+""
+],
+[
+"account.{n}.reg_fail_retry_interval",
+"seconds"
+],
+[
+"account.{n}.reject_anonymous_call",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.ringtone.ring_type",
+"ringtone name"
+],
+[
+"account.{n}.session_timer.enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.session_timer.expires",
+"seconds"
+],
+[
+"account.{n}.shared_line",
+"0 = off, 1 = shared call appearance, 2 = BLA"
+],
+[
+"account.{n}.sip_server.{n}.address",
+""
+],
+[
+"account.{n}.sip_server.{n}.expires",
+"seconds"
+],
+[
+"account.{n}.sip_server.{n}.port",
+""
+],
+[
+"account.{n}.sip_server.{n}.retry_counts",
+""
+],
+[
+"account.{n}.sip_server.{n}.transport_type",
+"0 = UDP, 1 = TCP, 2 = TLS, 3 = DNS-NAPTR"
+],
+[
+"account.{n}.srtp_encryption",
+"0 = off, 1 = optional, 2 = compulsory"
+],
+[
+"account.{n}.subscribe_mwi",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.subscribe_mwi_to_vm",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.timeout_fwd.enable",
+"0 = off, 1 = on"
+],
+[
+"account.{n}.timeout_fwd.off_code",
+""
+],
+[
+"account.{n}.timeout_fwd.on_code",
+""
+],
+[
+"account.{n}.timeout_fwd.target",
+""
+],
+[
+"account.{n}.timeout_fwd.timeout",
+"seconds"
+],
+[
+"account.{n}.user_name",
+""
+],
+[
+"action_url.always_fwd_off",
+"URL called on this event"
+],
+[
+"action_url.always_fwd_on",
+"URL called on this event"
+],
+[
+"action_url.answer_new_incoming_call",
+"URL called on this event"
+],
+[
+"action_url.busy_fwd_off",
+"URL called on this event"
+],
+[
+"action_url.busy_fwd_on",
+"URL called on this event"
+],
+[
+"action_url.busy_to_idle",
+"URL called on this event"
+],
+[
+"action_url.call_established",
+"URL called on this event"
+],
+[
+"action_url.call_terminated",
+"URL called on this event"
+],
+[
+"action_url.dnd_off",
+"URL called on this event"
+],
+[
+"action_url.dnd_on",
+"URL called on this event"
+],
+[
+"action_url.forward_incoming_call",
+"URL called on this event"
+],
+[
+"action_url.held",
+"URL called on this event"
+],
+[
+"action_url.hold",
+"URL called on this event"
+],
+[
+"action_url.idle_to_busy",
+"URL called on this event"
+],
+[
+"action_url.incoming_call",
+"URL called on this event"
+],
+[
+"action_url.ip_change",
+"URL called on this event"
+],
+[
+"action_url.missed_call",
+"URL called on this event"
+],
+[
+"action_url.mute",
+"URL called on this event"
+],
+[
+"action_url.off_hook",
+"URL called on this event"
+],
+[
+"action_url.on_hook",
+"URL called on this event"
+],
+[
+"action_url.open_message",
+"URL called on this event"
+],
+[
+"action_url.outgoing_call",
+"URL called on this event"
+],
+[
+"action_url.register_failed",
+"URL called on this event"
+],
+[
+"action_url.registered",
+"URL called on this event"
+],
+[
+"action_url.rejected_incoming_call",
+"URL called on this event"
+],
+[
+"action_url.setup_completed",
+"URL called on this event"
+],
+[
+"action_url.timeout_fwd_off",
+"URL called on this event"
+],
+[
+"action_url.timeout_fwd_on",
+"URL called on this event"
+],
+[
+"action_url.transfer_call",
+"URL called on this event"
+],
+[
+"action_url.transfer_failed",
+"URL called on this event"
+],
+[
+"action_url.transfer_finished",
+"URL called on this event"
+],
+[
+"action_url.unmute",
+"URL called on this event"
+],
+[
+"action_url.unregistered",
+"URL called on this event"
+],
+[
+"dialplan.area_code.code",
+""
+],
+[
+"dialplan.area_code.line_id",
+""
+],
+[
+"dialplan.area_code.max_len",
+""
+],
+[
+"dialplan.area_code.min_len",
+""
+],
+[
+"dialplan.block_out.line_id.{n}",
+""
+],
+[
+"dialplan.block_out.number.{n}",
+""
+],
+[
+"dialplan.digitmap.apply_to.directory_dial",
+"0 = off, 1 = on"
+],
+[
+"dialplan.digitmap.apply_to.forward",
+"0 = off, 1 = on"
+],
+[
+"dialplan.digitmap.apply_to.on_hook_dial",
+"0 = off, 1 = on"
+],
+[
+"dialplan.digitmap.enable",
+"0 = off, 1 = on"
+],
+[
+"dialplan.digitmap.string",
+"digit map"
+],
+[
+"dialplan.replace.line_id.{n}",
+""
+],
+[
+"dialplan.replace.prefix.{n}",
+""
+],
+[
+"dialplan.replace.replace.{n}",
+""
+],
+[
+"features.action_uri_limit_ip",
+"IP allowed to send action URIs"
+],
+[
+"features.allow_mute",
+"0 = off, 1 = on"
+],
+[
+"features.bluetooth_adapter_name",
+""
+],
+[
+"features.bluetooth_enable",
+"0 = off, 1 = on"
+],
+[
+"features.call_waiting.enable",
+"0 = off, 1 = on"
+],
+[
+"features.call_waiting.off_code",
+""
+],
+[
+"features.call_waiting.on_code",
+""
+],
+[
+"features.call_waiting.tone",
+"0 = off, 1 = on"
+],
+[
+"features.direct_ip_call_enable",
+"0 = off, 1 = on"
+],
+[
+"features.dnd.allow",
+"0 = off, 1 = on"
+],
+[
+"features.dnd.emergency_authorized_numbers",
+"comma-separated numbers"
+],
+[
+"features.dnd.emergency_enable",
+"0 = off, 1 = on"
+],
+[
+"features.dnd.off_code",
+""
+],
+[
+"features.dnd.on_code",
+""
+],
+[
+"features.dtmf.duration",
+"milliseconds"
+],
+[
+"features.dtmf.repetition",
+"1-3"
+],
+[
+"features.dtmf.volume",
+""
+],
+[
+"features.enhanced_dss_keys.enable",
+"0 = off, 1 = on"
+],
+[
+"features.forward_call_popup.enable",
+"0 = off, 1 = on"
+],
+[
+"features.headset_prior",
+"0 = off, 1 = on"
+],
+[
+"features.intercom.allow",
+"0 = off, 1 = on"
+],
+[
+"features.intercom.barge",
+"0 = off, 1 = on"
+],
+[
+"features.intercom.mute",
+"0 = off, 1 = on"
+],
+[
+"features.intercom.tone",
+"0 = off, 1 = on"
+],
+[
+"features.keep_mute",
+"0 = off, 1 = on"
+],
+[
+"features.key_tone",
+"0 = off, 1 = on"
+],
+[
+"features.missed_call_popup.enable",
+"0 = off, 1 = on"
+],
+[
+"features.pickup.direct_pickup_code",
+""
+],
+[
+"features.pickup.direct_pickup_enable",
+"0 = off, 1 = on"
+],
+[
+"features.pickup.group_pickup_code",
+""
+],
+[
+"features.pickup.group_pickup_enable",
+"0 = off, 1 = on"
+],
+[
+"features.play_hold_tone.delay",
+"seconds"
+],
+[
+"features.play_hold_tone.enable",
+"0 = off, 1 = on"
+],
+[
+"features.redial_tone",
+"0 = off, 1 = on"
+],
+[
+"features.remote_phonebook.enable",
+"0 = off, 1 = on"
+],
+[
+"features.remote_phonebook.flash_time",
+"seconds"
+],
+[
+"features.save_call_history",
+"0 = off, 1 = on"
+],
+[
+"features.text_message_popup.enable",
+"0 = off, 1 = on"
+],
+[
+"features.voice_mail_popup.enable",
+"0 = off, 1 = on"
+],
+[
+"features.voice_mail_tone_enable",
+"0 = off, 1 = on"
+],
+[
+"forward.international.enable",
+"0 = off, 1 = on"
+],
+[
+"lang.gui",
+"e.g. English"
+],
+[
+"lang.wui",
+"e.g. English"
+],
+[
+"ldap.base",
+""
+],
+[
+"ldap.call_in_lookup",
+"0 = off, 1 = on"
+],
+[
+"ldap.dial_lookup",
+"0 = off, 1 = on"
+],
+[
+"ldap.display_name",
+""
+],
+[
+"ldap.enable",
+"0 = off, 1 = on"
+],
+[
+"ldap.host",
+""
+],
+[
+"ldap.max_hits",
+""
+],
+[
+"ldap.name_attr",
+""
+],
+[
+"ldap.name_filter",
+""
+],
+[
+"ldap.numb_attr",
+""
+],
+[
+"ldap.number_filter",
+""
+],
+[
+"ldap.password",
+""
+],
+[
+"ldap.port",
+""
+],
+[
+"ldap.tls_mode",
+""
+],
+[
+"ldap.user",
+""
+],
+[
+"ldap.version",
+"2 or 3"
+],
+[
+"local_contact.data.delete",
+"http://localhost/all"
+],
+[
+"local_contact.data.url",
+"contacts XML URL"
+],
+[
+"local_time.date_format",
+"0-6"
+],
+[
+"local_time.dst_time_type",
+"0 = by date, 1 = by week"
+],
+[
+"local_time.end_time",
+""
+],
+[
+"local_time.interval",
+"seconds"
+],
+[
+"local_time.manual_ntp_srv_prior",
+"0 = off, 1 = on"
+],
+[
+"local_time.manual_time_enable",
+"0 = off, 1 = on"
+],
+[
+"local_time.ntp_server1",
+""
+],
+[
+"local_time.ntp_server2",
+""
+],
+[
+"local_time.offset_time",
+"minutes"
+],
+[
+"local_time.start_time",
+""
+],
+[
+"local_time.summer_time",
+"0 = off, 1 = on, 2 = automatic"
+],
+[
+"local_time.time_format",
+"0 = 12 hour, 1 = 24 hour"
+],
+[
+"local_time.time_zone",
+"e.g. -8"
+],
+[
+"local_time.time_zone_name",
+"e.g. United States-Pacific Time"
+],
+[
+"network.802_1x.identity",
+""
+],
+[
+"network.802_1x.md5_password",
+""
+],
+[
+"network.802_1x.mode",
+"0 = off, 1 = EAP-MD5, ..."
+],
+[
+"network.cdp.enable",
+"0 = off, 1 = on"
+],
+[
+"network.gateway",
+""
+],
+[
+"network.internet_port.type",
+"0 = DHCP, 1 = PPPoE, 2 = static"
+],
+[
+"network.ip_address",
+""
+],
+[
+"network.lldp.enable",
+"0 = off, 1 = on"
+],
+[
+"network.lldp.packet_interval",
+"seconds"
+],
+[
+"network.pc_port.enable",
+"0 = off, 1 = on"
+],
+[
+"network.primary_dns",
+""
+],
+[
+"network.qos.rtptos",
+"0-63"
+],
+[
+"network.qos.signaltos",
+"0-63"
+],
+[
+"network.secondary_dns",
+""
+],
+[
+"network.static_dns_enable",
+"0 = off, 1 = on"
+],
+[
+"network.subnet_mask",
+""
+],
+[
+"network.vlan.internet_port_enable",
+"0 = off, 1 = on"
+],
+[
+"network.vlan.internet_port_priority",
+"0-7"
+],
+[
+"network.vlan.internet_port_vid",
+"1-4094"
+],
+[
+"network.vlan.pc_port_enable",
+"0 = off, 1 = on"
+],
+[
+"network.vlan.pc_port_priority",
+"0-7"
+],
+[
+"network.vlan.pc_port_vid",
+"1-4094"
+],
+[
+"phone_setting.active_backlight_level",
+"1-10"
+],
+[
+"phone_setting.backlight_time",
+"seconds, or 0/1/15/30/60/120/300/600/1800"
+],
+[
+"phone_setting.call_info_display_method",
+""
+],
+[
+"phone_setting.common_power_led_enable",
+"0 = off, 1 = on"
+],
+[
+"phone_setting.contrast",
+"1-10"
+],
+[
+"phone_setting.headsetkey_mode",
+""
+],
+[
+"phone_setting.inactive_backlight_level",
+"0-2"
+],
+[
+"phone_setting.is_deal180",
+"0 = off, 1 = on"
+],
+[
+"phone_setting.lcd_logo.mode",
+"0 = off, 1 = logo only, 2 = logo + text"
+],
+[
+"phone_setting.mail_power_led_flash.enable",
+"0 = off, 1 = on"
+],
+[
+"phone_setting.missed_call_power_led_flash.enable",
+"0 = off, 1 = on"
+],
+[
+"phone_setting.ring_type",
+"ringtone name"
+],
+[
+"phone_setting.talk_and_dial",
+"0 = off, 1 = on"
+],
+[
+"remote_phonebook.data.{n}.name",
+""
+],
+[
+"remote_phonebook.data.{n}.url",
+""
+],
+[
+"remote_phonebook.display_name",
+""
+],
+[
+"ringtone.delete",
+"http://localhost/all"
+],
+[
+"ringtone.url",
+"ringtone file URL"
+],
+[
+"screensaver.delete",
+"http://localhost/all"
+],
+[
+"screensaver.type",
+""
+],
+[
+"screensaver.upload_url",
+"image URL"
+],
+[
+"screensaver.wait_time",
+"seconds"
+],
+[
+"security.cn_validation",
+"0 = off, 1 = on"
+],
+[
+"security.default_access_level",
+"0 = guest, 1 = user, 2 = admin"
+],
+[
+"security.trust_certificates",
+"0 = off, 1 = on"
+],
+[
+"sip.listen_port",
+""
+],
+[
+"sip.reg_surge_prevention",
+"seconds"
+],
+[
+"sip.rfc2543_hold",
+"0 = off, 1 = on"
+],
+[
+"sip.tls_listen_port",
+""
+],
+[
+"sip.use_23_as_pound",
+"0 = off, 1 = on"
+],
+[
+"static.auto_provision.attempt_expired_time",
+"seconds"
+],
+[
+"static.auto_provision.custom.protect",
+"0 = off, 1 = on"
+],
+[
+"static.auto_provision.dhcp_option.enable",
+"0 = off, 1 = on"
+],
+[
+"static.auto_provision.pnp_enable",
+"0 = off, 1 = on"
+],
+[
+"static.auto_provision.power_on",
+"0 = off, 1 = on"
+],
+[
+"static.auto_provision.repeat.enable",
+"0 = off, 1 = on"
+],
+[
+"static.auto_provision.repeat.minutes",
+"1-43200"
+],
+[
+"static.auto_provision.server.password",
+""
+],
+[
+"static.auto_provision.server.url",
+""
+],
+[
+"static.auto_provision.server.username",
+""
+],
+[
+"static.local_log.enable",
+"0 = off, 1 = on"
+],
+[
+"static.local_log.level",
+"0-6"
+],
+[
+"static.local_log.max_file_size",
+"KB"
+],
+[
+"static.security.user_name.admin",
+""
+],
+[
+"static.security.user_name.user",
+""
+],
+[
+"static.security.user_password",
+"username:password"
+],
+[
+"static.syslog.enable",
+"0 = off, 1 = on"
+],
+[
+"static.syslog.level",
+"0-6"
+],
+[
+"static.syslog.server",
+""
+],
+[
+"static.syslog.server_port",
+""
+],
+[
+"static.wui.http_enable",
+"0 = off, 1 = on"
+],
+[
+"static.wui.http_port",
+""
+],
+[
+"static.wui.https_enable",
+"0 = off, 1 = on"
+],
+[
+"static.wui.https_port",
+""
+],
+[
+"transfer.blind_tran_on_hook_enable",
+"0 = off, 1 = on"
+],
+[
+"transfer.dsskey_deal_type",
+""
+],
+[
+"transfer.on_hook_trans_enable",
+"0 = off, 1 = on"
+],
+[
+"transfer.semi_attend_tran_enable",
+"0 = off, 1 = on"
+],
+[
+"transfer.tran_others_after_conf_enable",
+"0 = off, 1 = on"
+],
+[
+"trusted_certificates.delete",
+"http://localhost/all"
+],
+[
+"trusted_certificates.url",
+"certificate URL"
+],
+[
+"voice.cng",
+"0 = off, 1 = on"
+],
+[
+"voice.echo_cancellation",
+"0 = off, 1 = on"
+],
+[
+"voice.tone.country",
+"e.g. United States"
+],
+[
+"voice.vad",
+"0 = off, 1 = on"
+],
+[
+"voice_mail.number.{n}",
+"voicemail access number"
+]
+]

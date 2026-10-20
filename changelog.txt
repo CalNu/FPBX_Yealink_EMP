@@ -1,3 +1,20 @@
+1.2.0
+• Fixed: the Generated Common Output box was missing after saving Global Settings (lost in the post/redirect step). It is shown again after each save.
+
+1.1.20
+• Autocomplete: after picking a key the selector stays open and offers the key's possible values (e.g. 0 / 1). It also appears when you type the = yourself, and in the value box of per-device override rows. Values come from the hint in epm_keys.json, or an optional third entry [["value","label"],...].
+
+1.1.19
+• Autocomplete dropdown: larger sans-serif text, hovering an option highlights it, and scrolling or dragging its scrollbar no longer closes it.
+
+1.1.18
+• Autocomplete dropdown on the custom key text boxes (global, template and per-device override). Start typing any part of a parameter name (e.g. intercom) and pick from known keys; Up/Down to move, Enter or Tab to accept, Esc to dismiss.
+• Known keys live in epm_keys.json (key + optional hint) and can be edited; {n} stands for a number such as the account.
+
+1.1.17
+• Ringtone filenames forced to lowercase everywhere (existing files on disk are renamed on load).
+• Ringtone URLs and the distinctive ringtone block in the cfg are written in plain alphabetical order of the lowercase names.
+
 1.1.16
 • Fixed: a phone connected through the VPN showed "Unknown / Offline" in the IP Address column because its MAC never reaches the PBX's ARP table over a routed tunnel. The column now falls back to the phone's OpenVPN virtual (tunnel) IP, matched by certificate CN (MAC, client-<ext> or <ext>), and finally to its registered PJSIP contact address when that lies inside the tunnel. LAN phones still use ARP first.
 • Fixed: the PJSIP-contact VPN check compared the contact address with its port attached, so it could never match a tunnel IP.

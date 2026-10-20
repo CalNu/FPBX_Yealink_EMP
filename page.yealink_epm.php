@@ -5109,3 +5109,252 @@ var epmOv = (function () {
         }
     }
 </script>
+
+<?php
+// Known Yealink parameter names for the custom-key autocomplete. Edit epm_keys.json to add more:
+// each entry is ["parameter.name", "optional hint"]; {n} stands for a number (account, key, slot).
+$epm_kc_catalog = [];
+$epm_kc_file = __DIR__ . '/epm_keys.json';
+if (is_readable($epm_kc_file)) {
+    $epm_kc_decoded = json_decode((string)file_get_contents($epm_kc_file), true);
+    if (is_array($epm_kc_decoded)) { $epm_kc_catalog = $epm_kc_decoded; }
+}
+?>
+<style>
+    #epm_kc_menu { display:none; position:fixed; z-index:100000; min-width:360px; max-width:680px; max-height:320px; overflow-y:auto; background:#fff; color:#222; border:1px solid #888; border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,.28); font:15px/1.4 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+    #epm_kc_menu .epm-kc-item { padding:6px 10px; cursor:pointer; display:flex; justify-content:space-between; gap:14px; white-space:nowrap; }
+    #epm_kc_menu .epm-kc-item:nth-child(even) { background:#f6f8f7; }
+    #epm_kc_menu .epm-kc-item.epm-kc-sel { background:#2e7d5b; color:#fff; }
+    #epm_kc_menu .epm-kc-hint { color:#7a847e; font-size:13px; overflow:hidden; text-overflow:ellipsis; }
+    #epm_kc_menu .epm-kc-item.epm-kc-sel .epm-kc-hint { color:#dff3e8; }
+    #epm_kc_menu b { font-weight:bold; text-decoration:underline; }
+</style>
+<script>
+(function () {
+    var CATALOG = <?= json_encode($epm_kc_catalog) ?>;
+    if (!CATALOG.length) { return; }
+    var SELECTOR = 'textarea[name="custom_inputs"], textarea[name="custom_inputs_global"], input[data-c="key"], input[data-c="value"]';
+    var menu = null, items = [], sel = 0, ctx = null;
+
+    // ---- possible values, taken from the catalog hint ("0 = off, 1 = on", "0-7", "2 or 3") ----
+    var VALUES = {};
+    function parseValues(h, k) {
+        h = String(h || '').trim();
+        var out = [], m;
+        if (/\.(delete)$/.test(k) && /^http:\/\/localhost\/all$/.test(h)) { return [[h, 'delete everything']]; }
+        if ((m = /^(\d+)\s*-\s*(\d+)$/.exec(h)) && (+m[2] - +m[1]) <= 12) {
+            for (var i = +m[1]; i <= +m[2]; i++) { out.push([String(i), '']); }
+            return out;
+        }
+        if ((m = /^(\d+) or (\d+)$/.exec(h))) { return [[m[1], ''], [m[2], '']]; }
+        h.split(',').forEach(function (part) {
+            var mm = /^\s*(\d+)\s*=\s*(.+?)\s*$/.exec(part);
+            if (mm) { out.push([mm[1], mm[2]]); }
+        });
+        return out;
+    }
+    CATALOG.forEach(function (c) {
+        var v = Array.isArray(c[2]) ? c[2] : parseValues(c[1], c[0]);
+        if (v.length) { VALUES[c[0].toLowerCase()] = v; }
+    });
+    function valuesFor(key) {
+        return VALUES[key.toLowerCase().replace(/\.(\d+)(?=\.|$)/g, '.{n}')] || null;
+    }
+
+    function ensureMenu() {
+        if (menu) return menu;
+        menu = document.createElement('div');
+        menu.id = 'epm_kc_menu';
+        // mousedown (not click) so the field keeps focus; also keeps focus when the scrollbar is used
+        menu.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            var it = e.target.closest('.epm-kc-item');
+            if (!it) return;
+            sel = parseInt(it.getAttribute('data-i'), 10);
+            accept();
+        });
+        menu.addEventListener('mouseover', function (e) {
+            var it = e.target.closest('.epm-kc-item');
+            if (!it) return;
+            var i = parseInt(it.getAttribute('data-i'), 10);
+            if (i !== sel) { sel = i; highlight(true); }
+        });
+        document.body.appendChild(menu);
+        return menu;
+    }
+    function hide() { if (menu) menu.style.display = 'none'; items = []; ctx = null; }
+    function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+    // account.2.label -> account.{n}.label, remembering the numbers that were typed
+    function normalize(tok) {
+        var nums = [];
+        var norm = tok.toLowerCase().replace(/\.(\d+)(?=\.|$)/g, function (m, d) { nums.push(d); return '.{n}'; });
+        return { norm: norm, nums: nums };
+    }
+    function fill(key, nums) {
+        var i = 0;
+        return key.replace(/\{n\}/g, function () { return (nums[i] !== undefined ? nums[i++] : (i++, '1')); });
+    }
+    function search(q) {
+        var out = [];
+        for (var i = 0; i < CATALOG.length; i++) {
+            var k = CATALOG[i][0], kl = k.toLowerCase(), p = kl.indexOf(q), score;
+            if (p < 0) continue;
+            if (p === 0) score = 0;
+            else if (/[._]/.test(kl.charAt(p - 1))) score = 1;
+            else score = 2;
+            out.push({ score: score, i: i });
+        }
+        out.sort(function (a, b) { return a.score - b.score || a.i - b.i; });
+        return out.slice(0, 14).map(function (o) { return CATALOG[o.i]; });
+    }
+
+    // Caret position inside a textarea (mirror-div technique)
+    function caretXY(ta, pos) {
+        var cs = getComputedStyle(ta), d = document.createElement('div');
+        ['fontFamily','fontSize','fontWeight','fontStyle','letterSpacing','lineHeight','textTransform','wordSpacing','textIndent','paddingTop','paddingRight','paddingBottom','paddingLeft','borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth','boxSizing','tabSize'].forEach(function (p) { d.style[p] = cs[p]; });
+        d.style.position = 'absolute'; d.style.visibility = 'hidden'; d.style.whiteSpace = 'pre-wrap'; d.style.wordWrap = 'break-word';
+        d.style.width = ta.clientWidth + 'px'; d.style.left = '-9999px'; d.style.top = '0';
+        d.textContent = ta.value.substring(0, pos);
+        var span = document.createElement('span'); span.textContent = ta.value.substring(pos) || '.';
+        d.appendChild(span); document.body.appendChild(d);
+        var lh = parseFloat(cs.lineHeight) || (parseFloat(cs.fontSize) * 1.3);
+        var r = ta.getBoundingClientRect();
+        var x = r.left + span.offsetLeft - ta.scrollLeft + parseFloat(cs.borderLeftWidth || 0);
+        var y = r.top + span.offsetTop - ta.scrollTop + lh + parseFloat(cs.borderTopWidth || 0);
+        document.body.removeChild(d);
+        return { x: x, y: y };
+    }
+
+    // What is being typed: a key (before "=") or a value (after "=")
+    function currentToken(f) {
+        if (f.tagName === 'TEXTAREA') {
+            var pos = f.selectionStart, v = f.value;
+            var ls = v.lastIndexOf('\n', pos - 1) + 1;
+            var le = v.indexOf('\n', pos); if (le < 0) le = v.length;
+            var before = v.slice(ls, pos);
+            if (/^\s*[#;]/.test(before)) return null;
+            var eq = before.indexOf('=');
+            if (eq >= 0) {
+                var keyTxt = before.slice(0, eq).trim();
+                var vs = ls + eq + 1;
+                while (vs < pos && /[ \t]/.test(v.charAt(vs))) { vs++; }
+                return { mode: 'value', key: keyTxt, text: v.slice(vs, pos), start: vs, end: le };
+            }
+            var lead = before.match(/^\s*/)[0].length;
+            var tail = (v.slice(pos).match(/^[A-Za-z0-9_.\-]*/) || [''])[0];
+            return { mode: 'key', text: before.slice(lead), start: ls + lead, end: pos + tail.length };
+        }
+        if (f.getAttribute('data-c') === 'value') {
+            var row = f.closest('.epm-ov-crow'), ki = row && row.querySelector('input[data-c="key"]');
+            return { mode: 'value', key: ki ? ki.value.trim() : '', text: f.value, start: 0, end: f.value.length };
+        }
+        return { mode: 'key', text: f.value.trim(), start: 0, end: f.value.length };
+    }
+
+    function render(f) {
+        var t = currentToken(f);
+        if (!t) { hide(); return; }
+        var res, n = null;
+        if (t.mode === 'value') {
+            var vals = valuesFor(t.key);
+            if (!vals) { hide(); return; }
+            var typed = t.text.trim().toLowerCase();
+            res = vals.filter(function (r) { return typed === '' || r[0].toLowerCase().indexOf(typed) === 0; });
+            if (!res.length || (res.length === 1 && res[0][0].toLowerCase() === typed)) { hide(); return; }
+        } else {
+            if (t.text.length < 2) { hide(); return; }
+            n = normalize(t.text);
+            res = search(n.norm);
+            // nothing to offer, or what is typed is already exactly the one suggestion
+            if (!res.length || (res.length === 1 && fill(res[0][0], n.nums).toLowerCase() === t.text.toLowerCase())) { hide(); return; }
+        }
+        ctx = { field: f, tok: t, nums: n ? n.nums : [], mode: t.mode };
+        items = res; sel = 0;
+        var m = ensureMenu(), h = '';
+        res.forEach(function (r, i) {
+            var label;
+            if (t.mode === 'value') {
+                label = '<b>' + esc(r[0]) + '</b>';
+            } else {
+                var key = r[0], p = key.toLowerCase().indexOf(n.norm);
+                if (p >= 0) { label = esc(key.slice(0, p)) + '<b>' + esc(key.slice(p, p + n.norm.length)) + '</b>' + esc(key.slice(p + n.norm.length)); }
+                else { label = esc(key); }
+                label = label.replace(/\{n\}/g, '<i>n</i>');
+            }
+            h += '<div class="epm-kc-item' + (i === 0 ? ' epm-kc-sel' : '') + '" data-i="' + i + '"><span>' + label + '</span><span class="epm-kc-hint">' + esc(t.mode === 'value' ? r[1] : (r[1] || '')) + '</span></div>';
+        });
+        m.innerHTML = h;
+        m.style.display = 'block';
+        var xy;
+        if (f.tagName === 'TEXTAREA') { xy = caretXY(f, f.selectionStart); }
+        else { var r2 = f.getBoundingClientRect(); xy = { x: r2.left, y: r2.bottom + 2 }; }
+        var mw = m.offsetWidth, mh = m.offsetHeight;
+        var x = Math.max(4, Math.min(xy.x, window.innerWidth - mw - 8));
+        var y = xy.y + 2;
+        if (y + mh > window.innerHeight - 6) { y = Math.max(4, xy.y - mh - 22); }
+        m.style.left = x + 'px'; m.style.top = y + 'px';
+    }
+
+    function highlight(noScroll) {
+        var kids = menu.querySelectorAll('.epm-kc-item');
+        Array.prototype.forEach.call(kids, function (k, i) { k.classList.toggle('epm-kc-sel', i === sel); });
+        if (!noScroll && kids[sel]) { kids[sel].scrollIntoView({ block: 'nearest' }); }
+    }
+
+    function accept() {
+        if (!ctx || !items[sel]) { hide(); return; }
+        var f = ctx.field, t = ctx.tok, mode = ctx.mode, picked = items[sel], nums = ctx.nums;
+        hide();
+        if (mode === 'value') {
+            // value picked: fill it in and close
+            if (f.tagName === 'TEXTAREA') {
+                var v = f.value;
+                f.value = v.slice(0, t.start) + picked[0] + v.slice(t.end);
+                var c = t.start + picked[0].length;
+                f.setSelectionRange(c, c);
+            } else {
+                f.value = picked[0];
+            }
+            f.dispatchEvent(new Event('input', { bubbles: true }));
+            f.focus();
+            return;
+        }
+        var key = fill(picked[0], nums);
+        if (f.tagName === 'TEXTAREA') {
+            var tv = f.value, after = tv.slice(t.end);
+            var add = /^\s*=/.test(after) ? '' : ' = ';
+            f.value = tv.slice(0, t.start) + key + add + after;
+            var caret = t.start + key.length + (add ? add.length : (after.match(/^\s*=\s*/) || [''])[0].length);
+            f.setSelectionRange(caret, caret);
+            f.dispatchEvent(new Event('input', { bubbles: true }));
+            f.focus();
+            render(f);                    // keep the selector open, now offering the possible values
+        } else {
+            f.value = key;
+            f.dispatchEvent(new Event('input', { bubbles: true }));
+            var row = f.closest('.epm-ov-crow'), nxt = row && row.querySelector('input[data-c="value"]');
+            if (nxt) { nxt.focus(); render(nxt); }
+        }
+    }
+
+    document.addEventListener('input', function (e) {
+        var f = e.target;
+        if (!f.matches || !f.matches(SELECTOR) || f.readOnly || e.isTrusted === false) { return; }
+        render(f);
+    }, true);
+    document.addEventListener('keydown', function (e) {
+        if (!menu || menu.style.display !== 'block' || !items.length) { return; }
+        var k = e.key;
+        if (k === 'ArrowDown') { sel = (sel + 1) % items.length; highlight(); e.preventDefault(); }
+        else if (k === 'ArrowUp') { sel = (sel - 1 + items.length) % items.length; highlight(); e.preventDefault(); }
+        else if (k === 'Enter' || k === 'Tab') { e.preventDefault(); e.stopPropagation(); accept(); }
+        else if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); hide(); }
+    }, true);
+    document.addEventListener('focusout', function (e) {
+        if (e.target.matches && e.target.matches(SELECTOR)) { setTimeout(function () { if (!document.activeElement || !document.activeElement.matches || !document.activeElement.matches(SELECTOR)) { hide(); } }, 120); }
+    }, true);
+    window.addEventListener('scroll', function (e) { if (menu && e.target && (e.target === menu || menu.contains(e.target))) { return; } hide(); }, true);
+    window.addEventListener('resize', hide);
+})();
+</script>

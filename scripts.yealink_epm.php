@@ -80,6 +80,12 @@ if (file_exists($module_xml_path)) {
 $generated_common_cfg = "";
 $generated_template_cfg = "";
 $status = "";
+// The Global save redirects (Post/Redirect/Get), so the generated y-config text it produced is carried
+// across the redirect in the session and shown once in the Generated Common Output box.
+if (isset($_SESSION['epm_flash_global_cfg'])) {
+    $generated_common_cfg = (string)$_SESSION['epm_flash_global_cfg'];
+    unset($_SESSION['epm_flash_global_cfg']);
+}
 // One-shot message left by a Device Manager action just before its redirect
 // (Post/Redirect/Get), so reloading the page never re-submits the form.
 if (!empty($_SESSION['epm_flash_status'])) {
@@ -126,6 +132,22 @@ foreach ([$logo_dir, $ringtone_dir, $template_dir, $vpnkeys_dir] as $dir) {
         @chown($dir, 'asterisk');
     }
 }
+
+// Ringtone filenames are always lowercase so the phone's alphabetical slot order matches the order we
+// compute. Renames any mixed-case ringtone already on disk (rebuilds / manual copies can leave them).
+if (!function_exists('epm_lowercase_ringtone_dir')) {
+    function epm_lowercase_ringtone_dir($dir) {
+        foreach (glob(rtrim($dir, '/') . '/*.*') ?: [] as $f) {
+            $b = basename($f);
+            $l = strtolower($b);
+            if ($b !== $l && is_file($f)) {
+                $t = dirname($f) . '/' . $l;
+                if (!file_exists($t) && @rename($f, $t)) { @chown($t, 'asterisk'); @chgrp($t, 'asterisk'); }
+            }
+        }
+    }
+}
+epm_lowercase_ringtone_dir($ringtone_dir);
 
 if (!file_exists($tftp_dir)) {
     @mkdir($tftp_dir, 0775, true);
@@ -1323,8 +1345,8 @@ function buildDistinctiveRingtoneConfigBlock($active_ringtones = [], $model = ''
         return "";
     }
 
-    $ring_files = array_values(array_unique($active_ringtones));
-    sort($ring_files, SORT_STRING | SORT_FLAG_CASE);
+    $ring_files = array_values(array_unique(array_map('strtolower', $active_ringtones)));
+    sort($ring_files, SORT_STRING);
 
     $cfg = "######## DISTINCTIVE RINGTONE & ALERT INFO SETUP ########\n";
     $cfg .= "features.alert_info_tone = 1\n";
@@ -2416,7 +2438,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_device_overrides' && !emp
     }
 
     $ov_custom_files = array_values(array_filter(array_map('basename', glob($ringtone_dir . '*.*') ?: [])));
-    usort($ov_custom_files, 'strcasecmp');
+    sort($ov_custom_files, SORT_STRING);
     $ov_builtin = [];
     foreach ($builtin_ringtones as $rv => $rl) { $ov_builtin[] = [$rv, $rl]; }
 
@@ -3850,7 +3872,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     if (!isset($_POST['uploaded_ringtones'])) {
         $formData['uploaded_ringtones'] = [];
     } else {
-        sort($formData['uploaded_ringtones'], SORT_STRING | SORT_FLAG_CASE);
+        $formData['uploaded_ringtones'] = array_map('strtolower', (array)$formData['uploaded_ringtones']);
+        sort($formData['uploaded_ringtones'], SORT_STRING);
         $formData['uploaded_ringtones'] = array_values(array_unique($formData['uploaded_ringtones']));
     }
 
@@ -3973,6 +3996,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
     $generated_template_cfg .= "\n";
 
     $acct_ring = $formData['account_ringtone'] ?? 'Common';
+    if (is_file($ringtone_dir . strtolower((string)$acct_ring)) && preg_match('/\.(wav|mp3)$/i', (string)$acct_ring)) { $acct_ring = strtolower($acct_ring); }
     $generated_template_cfg .= "account.1.ringtone.ring_type = {$acct_ring}\n";
     
     if (!empty($formData['uploaded_ringtones']) && is_array($formData['uploaded_ringtones'])) {
@@ -3988,7 +4012,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_template'])) {
         $formData['uploaded_ringtones'] = $valid_ringtones;
 
         if (!empty($formData['uploaded_ringtones'])) {
-            sort($formData['uploaded_ringtones'], SORT_STRING | SORT_FLAG_CASE);
+            sort($formData['uploaded_ringtones'], SORT_STRING);
             $formData['uploaded_ringtones'] = array_values(array_unique($formData['uploaded_ringtones']));
 
             $generated_template_cfg .= "account.1.alert_info_url_enable = 1\n\n";
@@ -4293,12 +4317,13 @@ if (isset($_POST['load_template']) || !empty($_POST['template_to_load'])) {
             $filtered_ringtones = [];
 
             foreach ($formData['uploaded_ringtones'] as $r_check) {
+                $r_check = strtolower($r_check);
                 if (in_array($r_check, $existing_ringtone_files)) {
                     $filtered_ringtones[] = $r_check;
                 }
             }
 
-            sort($filtered_ringtones, SORT_STRING | SORT_FLAG_CASE);
+            sort($filtered_ringtones, SORT_STRING);
             $formData['uploaded_ringtones'] = array_values(array_unique($filtered_ringtones));
         }
 
@@ -4585,7 +4610,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['device_action']) && !i
 // ============================================================================
 $existing_ringtones_init = glob($ringtone_dir . "*.*");
 $ringtone_filenames = array_map('basename', is_array($existing_ringtones_init) ? $existing_ringtones_init : []);
-sort($ringtone_filenames, SORT_STRING | SORT_FLAG_CASE);
+sort($ringtone_filenames, SORT_STRING);
 
 $ringtone_file_sizes = [];
 foreach ($ringtone_filenames as $rf) {
@@ -4838,6 +4863,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['save_global'])) {
         . ($epm_prov_port_notice !== '' ? ' ' . $epm_prov_port_notice : '')
         . ' ' . $epm_auth_msg
         . ' ' . epm_unblock_vpn_dirs(epm_folder_auth_active());
+    $_SESSION['epm_flash_global_cfg'] = $generated_common_cfg;
     epm_redirect_after_post('tab_global', $status);
 }
 

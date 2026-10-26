@@ -3,7 +3,7 @@ Freepbx Endpoint Manager for Yealink Phones
 
 As this is not a Sangoma or a commercial module, ~~you will get an unsigned module warning telling you to remove it.  To disable the warning in SSH, run: "fwconsole setting SIGNATURECHECK 0".  This can also be done in the gui under Settings -> Advanced Settings -> "Enable Module Signature Checking" -> No (if you don't see it you need to set "Display Readonly Settings" and "Override Readonly Settings" to yes)~~ This is self signed now :) 
 
-Currently only tested with legacy T28P phones with V.73 firmware. Should work with newer yealink phones, but untested.
+Currently only tested with legacy T28P phones with V.73 firmware and T48S. Should work with newer yealink phones, but untested.
 
 This EPM will install a new module ~~under the settings menu~~ called Yealink Endpoint Manager. It has all the settings I normally fill in on configs.  
 On the Global Settings tab, it should automatically fill in your server ip or FQDN and pull your time zone/set ntp to the pbx.  The dial now rules get pulled from your outbound routs, but only the one named "Outbound".  This will create a ~~y000000000000.cfg~~ Y-config for all the listed Yealink phones provisioned. Currently there is no separation of global settings between models, all y-configs are the same but named to match your model.  You can add custom global configs in the field labeled Global Custom Keys. 

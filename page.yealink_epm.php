@@ -2496,6 +2496,19 @@ function toggleOvpnState(ext, mac, enable) {
     .epm-ov-ta { width:100%; box-sizing:border-box; min-height:110px; font-family:monospace; font-size:12px; padding:8px; border:1px solid #b9d3c1; border-radius:4px; }
     .epm-ov-sel { width:100%; padding:6px; border:1px solid #b9d3c1; border-radius:4px; }
     #epm_ov_msg { font-size:12px; margin-right:auto; }
+    /* Line / Memory key rows in Device Overrides: a grid so the sortable column headers line up. */
+    .epm-ov-keyrow, .epm-ov-keyhead { display:grid; grid-template-columns:22px 26px 130px minmax(0,1.4fr) minmax(0,1.4fr) minmax(0,1fr) 86px; gap:8px; align-items:center; }
+    .epm-ov-keyrow > *, .epm-ov-keyhead > * { min-width:0; }
+    .epm-ov-keyrow select, .epm-ov-keyrow input { width:100%; box-sizing:border-box; }
+    .epm-ov-keyhead { position:sticky; top:0; z-index:2; padding:6px 10px; background:#d3e8da; color:#155b3b; border-bottom:1px solid #65a783; border-radius:3px; font-size:12px; font-weight:bold; }
+    .epm-ov-num.epm-ov-drag { cursor:grab; user-select:none; }
+    .epm-ov-num.epm-ov-drag:active { cursor:grabbing; }
+    .epm-ov-row.epm-ov-dragging { opacity:.4; }
+    .epm-ov-row.epm-ov-drop { outline:2px dashed #307847; outline-offset:-2px; }
+    @media (max-width:640px) {
+        .epm-ov-keyhead { display:none; }
+        .epm-ov-keyrow { display:flex; }
+    }
 </style>
 <script>
 var epmOv = (function () {
@@ -2539,12 +2552,21 @@ var epmOv = (function () {
         return o;
     }
 
+    // Column header row with the same Extension / Label sort toggles as the Template Manager.
+    function keyHead(kind) {
+        function s(f, label) {
+            return '<span class="gen-key-sortable" data-ov-kind="' + kind + '" data-field="' + f + '" onclick="epmOv.toggleSort(\'' + kind + '\',\'' + f + '\')">' + label + ' <span class="sort-caret">⇅</span></span>';
+        }
+        return '<div class="epm-ov-keyhead"><span></span><span></span><span>Type</span>' + s('value', 'Extension') + s('label', 'Label') + '<span>Pickup</span><span>Line</span></div>';
+    }
+
     function keyRows(list, prefix, lockFirst) {
         var h = '';
         list.forEach(function (k, i) {
             var idx = i + 1, locked = (lockFirst && idx === 1);
-            h += '<div class="epm-ov-row' + (locked ? ' epm-ov-locked' : '') + '" data-idx="' + idx + '">' +
-              undoSlot() + '<span class="epm-ov-num">' + idx + '</span>' +
+            h += '<div class="epm-ov-row epm-ov-keyrow' + (locked ? ' epm-ov-locked' : '') + '" data-idx="' + idx + '">' +
+              undoSlot() + (locked ? '<span class="epm-ov-num">' + idx + '</span>'
+                                   : '<span class="epm-ov-num epm-ov-drag" draggable="true" title="Drag to reorder">' + idx + '</span>') +
               '<select data-f="type"' + (locked ? ' disabled' : '') + '>' + typeOptions(data.dss, k.type) + '</select>' +
               '<input data-f="value" placeholder="Value / Extension" value="' + esc(k.value) + '"' + (locked ? ' disabled' : '') + '>' +
               '<input data-f="label" placeholder="Label" value="' + esc(k.label) + '"' + (locked ? ' disabled' : '') + '>' +
@@ -2715,8 +2737,12 @@ var epmOv = (function () {
              '<div id="epm_ov_custom_list">' + customRowsHtml() + '</div>' +
              '<div class="epm-ov-btnrow"><button type="button" class="gen-btn" onclick="epmOv.customAdd()">Add Line</button></div>';
         el('epm_ov_main_body').innerHTML = h;
-        el('epm_ov_line_body').innerHTML = keyRows(data.linekeys, 'linekey', true);
-        el('epm_ov_mem_body').innerHTML = data.memkeys.length ? keyRows(data.memkeys, 'memorykey', false) : '<div style="padding:16px; font-size:13px; opacity:.8;">This phone has no memory keys: it has no built-in ones and its template has no expansion module.</div>';
+        sortState.line = { field: null, dir: null };
+        sortState.mem = { field: null, dir: null };
+        el('epm_ov_line_body').innerHTML = keyHead('line') + keyRows(data.linekeys, 'linekey', true);
+        el('epm_ov_mem_body').innerHTML = data.memkeys.length ? keyHead('mem') + keyRows(data.memkeys, 'memorykey', false) : '<div style="padding:16px; font-size:13px; opacity:.8;">This phone has no memory keys: it has no built-in ones and its template has no expansion module.</div>';
+        bindDrag(el('epm_ov_line_body'));
+        bindDrag(el('epm_ov_mem_body'));
         el('epm_ov_prog_body').innerHTML = progRows();
         el('epm_ov_prog_body').querySelectorAll('select[data-f="type"]').forEach(progType);
         el('epm_ov_ring').value = data.ringtone;
@@ -2814,12 +2840,139 @@ var epmOv = (function () {
         if (kind === 'prog') { progType(ctl(row, 'type')); }
     }
 
+    // ---- Line / Memory key sorting and drag-to-reorder ----------------------
+    // Like the Template Manager: the slot numbers (and the cfg names behind them) never move,
+    // only the type / extension / label / pickup / line inside them. Line key 1 is locked.
+    var KEY_FIELDS = ['type', 'value', 'label', 'pickup', 'line'];
+    var sortState = { line: { field: null, dir: null }, mem: { field: null, dir: null } };
+
+    function movableRows(body) {
+        return Array.prototype.filter.call(body.querySelectorAll('.epm-ov-row'), function (r) { return !r.classList.contains('epm-ov-locked'); });
+    }
+    function readKeyRow(r) {
+        var o = {};
+        KEY_FIELDS.forEach(function (f) { var c = ctl(r, f); o[f] = c ? c.value : ''; });
+        return o;
+    }
+    function writeKeyRow(r, o) {
+        KEY_FIELDS.forEach(function (f) { var c = ctl(r, f); if (c && o[f] !== undefined) c.value = o[f]; });
+    }
+    function updateSortIcons(kind) {
+        var st = sortState[kind], body = el(BODY_IDS[kind]);
+        if (!st || !body) return;
+        body.querySelectorAll('.gen-key-sortable[data-ov-kind]').forEach(function (h) {
+            var icon = h.querySelector('.sort-caret');
+            if (!icon) return;
+            icon.textContent = (st.field === h.getAttribute('data-field')) ? (st.dir === 'asc' ? '▲' : '▼') : '⇅';
+        });
+    }
+    function clearSort(kind) {
+        sortState[kind] = { field: null, dir: null };
+        updateSortIcons(kind);
+    }
+    function keysChanged(kind, body, text) {
+        refreshUndo(body);
+        var msg = el('epm_ov_msg');
+        if (msg) { msg.textContent = text + ' - press Save to apply.'; }
+    }
+
+    // field: 'value' (Extension, numeric when both are plain numbers) or 'label' (alphabetical).
+    // Blank entries always go to the end.
+    function sortKeys(kind, field, dir) {
+        var body = el(BODY_IDS[kind]);
+        if (!body) return;
+        var rows = movableRows(body);
+        if (rows.length < 2) return;
+        var vals = rows.map(readKeyRow);
+        vals.sort(function (a, b) {
+            var av = (a[field] || '').trim(), bv = (b[field] || '').trim();
+            if (av === '' && bv === '') return 0;
+            if (av === '') return 1;
+            if (bv === '') return -1;
+            if (field === 'value' && /^[0-9]+$/.test(av) && /^[0-9]+$/.test(bv)) {
+                return dir === 'desc' ? (parseInt(bv, 10) - parseInt(av, 10)) : (parseInt(av, 10) - parseInt(bv, 10));
+            }
+            var c = av.localeCompare(bv, undefined, { sensitivity: 'base', numeric: true });
+            return dir === 'desc' ? -c : c;
+        });
+        rows.forEach(function (r, i) { writeKeyRow(r, vals[i]); });
+        keysChanged(kind, body, 'Keys sorted');
+    }
+    function toggleSort(kind, field) {
+        var st = sortState[kind];
+        if (!st) return;
+        var dir = (st.field === field && st.dir === 'asc') ? 'desc' : 'asc';
+        st.field = field;
+        st.dir = dir;
+        sortKeys(kind, field, dir);
+        updateSortIcons(kind);
+    }
+
+    // Move the key in slot fromIdx to slot toIdx, shifting the ones in between.
+    function moveKey(kind, fromIdx, toIdx) {
+        var body = el(BODY_IDS[kind]);
+        if (!body) return;
+        var rows = movableRows(body), from = -1, to = -1;
+        rows.forEach(function (r, i) {
+            var n = parseInt(r.getAttribute('data-idx'), 10);
+            if (n === fromIdx) from = i;
+            if (n === toIdx) to = i;
+        });
+        if (from < 0 || to < 0 || from === to) return;
+        var vals = rows.map(readKeyRow);
+        vals.splice(to, 0, vals.splice(from, 1)[0]);
+        rows.forEach(function (r, i) { writeKeyRow(r, vals[i]); });
+        clearSort(kind);
+        keysChanged(kind, body, 'Key moved');
+    }
+
+    function bindDrag(body) {
+        if (!body || body.getAttribute('data-drag-bound')) return;
+        body.setAttribute('data-drag-bound', '1');
+        var kind = kindOf(body), fromIdx = null;
+        function rowOf(e) { return e.target.closest ? e.target.closest('.epm-ov-row') : null; }
+        function clearMarks() {
+            body.querySelectorAll('.epm-ov-dragging, .epm-ov-drop').forEach(function (r) { r.classList.remove('epm-ov-dragging', 'epm-ov-drop'); });
+        }
+        body.addEventListener('dragstart', function (e) {
+            var h = e.target.closest ? e.target.closest('.epm-ov-drag') : null;
+            if (!h) return;
+            var row = h.closest('.epm-ov-row');
+            fromIdx = parseInt(row.getAttribute('data-idx'), 10);
+            if (e.dataTransfer) {
+                e.dataTransfer.effectAllowed = 'move';
+                try { e.dataTransfer.setData('text/plain', String(fromIdx)); } catch (err) { /* ignore */ }
+            }
+            row.classList.add('epm-ov-dragging');
+        });
+        body.addEventListener('dragover', function (e) {
+            if (fromIdx === null) return;
+            var row = rowOf(e);
+            if (!row || row.classList.contains('epm-ov-locked')) return;
+            e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+            body.querySelectorAll('.epm-ov-drop').forEach(function (r) { if (r !== row) r.classList.remove('epm-ov-drop'); });
+            row.classList.add('epm-ov-drop');
+        });
+        body.addEventListener('drop', function (e) {
+            if (fromIdx === null) return;
+            var row = rowOf(e);
+            if (row && !row.classList.contains('epm-ov-locked')) {
+                e.preventDefault();
+                moveKey(kind, fromIdx, parseInt(row.getAttribute('data-idx'), 10));
+            }
+            clearMarks();
+        });
+        body.addEventListener('dragend', function () { fromIdx = null; clearMarks(); });
+    }
+
     // Reset every key in one window. Nothing is written until Save / Save & Sync is pressed;
     // saving then finds no difference from the template and drops this device's overrides.
     function reset(kind) {
         var body = el(BODY_IDS[kind]);
         if (!data || !body || !baseRows(kind)) return;
         body.querySelectorAll('.epm-ov-row').forEach(function (r) { applyBase(kind, r); });
+        if (sortState[kind]) clearSort(kind);
         refreshUndo(body);
         var msg = el('epm_ov_msg');
         if (msg) { msg.textContent = 'Template defaults restored - press Save to apply.'; }
@@ -2898,7 +3051,7 @@ var epmOv = (function () {
             .catch(function (e) { el('epm_ov_msg').textContent = 'Save failed: ' + e; });
     }
 
-    return { open: open, save: save, progType: progType, reset: reset, resetRow: resetRow, undoMain: undoMain, customAdd: customAdd, customUndo: customUndo };
+    return { open: open, save: save, progType: progType, reset: reset, resetRow: resetRow, undoMain: undoMain, customAdd: customAdd, customUndo: customUndo, toggleSort: toggleSort };
 })();
 </script>
 
@@ -4235,18 +4388,18 @@ var epmOv = (function () {
                 </div>
             </div>
 
-            <table class="oss-table">
+            <table class="oss-table" id="epm_devices_table">
                 <thead>
                     <tr>
                         <th style="width: 50px; text-align:center;"><input type="checkbox" onclick="toggleSelectAllPhones(this)"></th>
-                        <th>MAC Address</th>
-                        <th>IP Address</th>
-                        <th>Brand</th>
-                        <th>Model</th>
-                        <th>Template</th>
-                        <th>Assigned Extension</th>
+                        <th class="gen-key-sortable" data-col="mac" onclick="toggleDeviceSort('mac')">MAC Address <span class="sort-caret">&#x21c5;</span></th>
+                        <th class="gen-key-sortable" data-col="ip" onclick="toggleDeviceSort('ip')">IP Address <span class="sort-caret">&#x21c5;</span></th>
+                        <th class="gen-key-sortable" data-col="brand" onclick="toggleDeviceSort('brand')">Brand <span class="sort-caret">&#x21c5;</span></th>
+                        <th class="gen-key-sortable" data-col="model" onclick="toggleDeviceSort('model')">Model <span class="sort-caret">&#x21c5;</span></th>
+                        <th class="gen-key-sortable" data-col="template" onclick="toggleDeviceSort('template')">Template <span class="sort-caret">&#x21c5;</span></th>
+                        <th class="gen-key-sortable" data-col="ext" onclick="toggleDeviceSort('ext')">Assigned Extension <span class="sort-caret">&#x21c5;</span></th>
                         <?php if ($ovpn_installed): ?>
-                            <th style="text-align:center; width: 100px;" title="Download Key Package in OpenVPN Manager Module">VPN</th>
+                            <th class="gen-key-sortable" data-col="vpn" onclick="toggleDeviceSort('vpn')" style="text-align:center; width: 100px;" title="Download Key Package in OpenVPN Manager Module">VPN <span class="sort-caret">&#x21c5;</span></th>
                         <?php endif; ?>
                     </tr>
                 </thead>
@@ -4561,6 +4714,101 @@ var epmOv = (function () {
             }
         });
     }
+
+    // ---- Device table column sorting (same toggles as the key columns) --------
+    // Click a header: ascending, click again: descending. Blank values (no IP, no template,
+    // unassigned extension) always sort to the end. VPN sorts enabled first, then disabled.
+    // The choice is remembered in this browser, since every rebuild reloads the page.
+    var epmDevSort = { col: null, dir: null };
+
+    function epmDevCell(tr, col, idx) {
+        var td = tr.cells[idx], inp, sel;
+        if (!td) { return ''; }
+        if (col === 'mac') {
+            inp = td.querySelector('input[type="text"]');
+            return inp ? inp.value.trim().toLowerCase() : '';
+        }
+        if (col === 'ip') {
+            var t = td.textContent.trim();
+            return /^\d{1,3}(\.\d{1,3}){3}$/.test(t) ? t : '';
+        }
+        if (col === 'template') {
+            sel = td.querySelector('select');
+            return (sel && sel.value !== '' && sel.selectedIndex >= 0) ? sel.options[sel.selectedIndex].text.trim() : '';
+        }
+        if (col === 'ext') {
+            sel = td.querySelector('select');
+            return sel ? sel.value : '';
+        }
+        if (col === 'vpn') {
+            inp = td.querySelector('input[type="checkbox"]');
+            return (inp && inp.checked) ? '1' : '0';
+        }
+        return td.textContent.trim();
+    }
+
+    function epmDevCompare(col, av, bv) {
+        if (col === 'ip') {
+            var a = av.split('.'), b = bv.split('.');
+            for (var i = 0; i < 4; i++) {
+                var d = (parseInt(a[i], 10) || 0) - (parseInt(b[i], 10) || 0);
+                if (d !== 0) { return d; }
+            }
+            return 0;
+        }
+        if (col === 'ext' && /^[0-9]+$/.test(av) && /^[0-9]+$/.test(bv)) {
+            return parseInt(av, 10) - parseInt(bv, 10);
+        }
+        return av.localeCompare(bv, undefined, { sensitivity: 'base', numeric: true });
+    }
+
+    function epmSortDevices(col, dir) {
+        var table = document.getElementById('epm_devices_table');
+        var th = table ? table.querySelector('th[data-col="' + col + '"]') : null;
+        if (!th || !table.tBodies.length) { return; }
+        var idx = th.cellIndex, tbody = table.tBodies[0];
+        var items = Array.prototype.filter.call(tbody.rows, function (r) { return r.querySelector('.phone_checkbox'); })
+            .map(function (r, i) { return { row: r, i: i, v: epmDevCell(r, col, idx) }; });
+        if (items.length < 2) { return; }
+        items.sort(function (x, y) {
+            if (x.v === '' && y.v === '') { return x.i - y.i; }
+            if (x.v === '') { return 1; }
+            if (y.v === '') { return -1; }
+            var c = epmDevCompare(col, x.v, y.v);
+            if (col === 'vpn') { c = -c; }               // enabled ('1') first when ascending
+            if (c === 0) { return x.i - y.i; }
+            return (dir === 'desc') ? -c : c;
+        });
+        items.forEach(function (it) { tbody.appendChild(it.row); });
+    }
+
+    function epmDevSortIcons() {
+        document.querySelectorAll('#epm_devices_table th[data-col]').forEach(function (th) {
+            var icon = th.querySelector('.sort-caret');
+            var active = (epmDevSort.col === th.getAttribute('data-col'));
+            if (icon) { icon.textContent = active ? (epmDevSort.dir === 'asc' ? '▲' : '▼') : '⇅'; }
+            if (active) { th.setAttribute('aria-sort', epmDevSort.dir === 'asc' ? 'ascending' : 'descending'); }
+            else { th.removeAttribute('aria-sort'); }
+        });
+    }
+
+    function toggleDeviceSort(col) {
+        var dir = (epmDevSort.col === col && epmDevSort.dir === 'asc') ? 'desc' : 'asc';
+        epmDevSort = { col: col, dir: dir };
+        epmSortDevices(col, dir);
+        epmDevSortIcons();
+        try { localStorage.setItem('epm_dev_sort', JSON.stringify(epmDevSort)); } catch (e) { /* storage unavailable */ }
+    }
+
+    (function () {
+        var saved = null;
+        try { saved = JSON.parse(localStorage.getItem('epm_dev_sort') || 'null'); } catch (e) { saved = null; }
+        if (!saved || (saved.dir !== 'asc' && saved.dir !== 'desc')) { return; }
+        if (!/^[a-z]+$/.test(String(saved.col)) || !document.querySelector('#epm_devices_table th[data-col="' + saved.col + '"]')) { return; }
+        epmDevSort = { col: saved.col, dir: saved.dir };
+        epmSortDevices(saved.col, saved.dir);
+        epmDevSortIcons();
+    })();
 
     (function () {
         var dragKeyType = null;

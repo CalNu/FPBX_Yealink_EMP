@@ -1,3 +1,10 @@
+1.2.2
+• Added: the Registered Extensions & Devices table has the same sort toggles as the key columns. Click MAC Address, IP Address, Brand, Model, Template, Assigned Extension or VPN to sort ascending, click again for descending. IPs sort by address (not as text); blank values (no IP, no template, unassigned) always go last; VPN puts enabled phones first. The choice is remembered in this browser.
+• Added: Device Overrides > Line Keys and Memory Keys now have the Template Manager's Extension / Label sort toggles and drag-to-reorder (drag a key's number onto another slot). Slot numbers stay put and only the key data moves, line key 1 stays fixed, and moved slots show in red as overrides until you press Save. Reset to Template Defaults also clears the sort arrows.
+
+1.2.1
+• Fixed: a phone on the PBX LAN that reaches the VPN through the public IP could show its LAN address (from the ARP table) instead of its tunnel address. The IP column now prefers the phone's registered PJSIP contact address when it lies inside the VPN tunnel, then ARP, then the OpenVPN virtual IP. A LAN phone registering from its LAN address (VPN server local IP) still shows the LAN IP.
+
 1.2.0
 • Fixed: the Generated Common Output box was missing after saving Global Settings (lost in the post/redirect step). It is shown again after each save.
 

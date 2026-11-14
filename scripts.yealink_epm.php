@@ -4753,17 +4753,25 @@ if (is_array($existing_files)) {
             $assigned_extensions_map[(string)$ext_num] = true;
         }
 
-        // 1) LAN phones: ARP table.  2) VPN phones: the tunnel's virtual IP, matched
-        // by certificate CN (MAC, "client-<ext>" or "<ext>").  3) Last resort: the
-        // phone's registered PJSIP contact address if it sits inside the tunnel.
-        $ip_addr = $arp_table[$file_name_no_ext] ?? '';
+        // Which address to show, in order:
+        // 1) The phone's registered PJSIP contact address, when it sits inside
+        //    the VPN tunnel. This is what Asterisk really talks to, so it wins
+        //    over ARP: a phone on the PBX's own LAN that reaches the VPN through
+        //    the public IP still has a (stale or live) ARP entry for its LAN
+        //    address even though its traffic is going through the tunnel.
+        // 2) LAN phones: ARP table (also covers a phone on the LAN that uses the
+        //    VPN server's local address, whose SIP source is its LAN IP).
+        // 3) Phones reachable only through the VPN: the tunnel's virtual IP,
+        //    matched by certificate CN (MAC, "client-<ext>" or "<ext>").
+        $ip_addr = '';
+        if ($ext_num !== '' && isset($online_exts[$ext_num])) {
+            $via = preg_replace('/:\d+$/', '', (string)($online_exts[$ext_num]['via'] ?? ''));
+            if ($via !== '' && in_array($via, $ovpn_connected_ips, true)) { $ip_addr = $via; }
+        }
+        if ($ip_addr === '') { $ip_addr = $arp_table[$file_name_no_ext] ?? ''; }
         if ($ip_addr === '') {
             $vpn_ip = $ovpn_cn_to_vip[$file_name_no_ext]
                 ?? (($ext_num !== '') ? ($ovpn_cn_to_vip["client-{$ext_num}"] ?? $ovpn_cn_to_vip[(string)$ext_num] ?? '') : '');
-            if ($vpn_ip === '' && $ext_num !== '' && isset($online_exts[$ext_num])) {
-                $via = preg_replace('/:\d+$/', '', (string)($online_exts[$ext_num]['via'] ?? ''));
-                if ($via !== '' && in_array($via, $ovpn_connected_ips, true)) { $vpn_ip = $via; }
-            }
             $ip_addr = $vpn_ip !== '' ? $vpn_ip : 'Unknown / Offline';
         }
 
